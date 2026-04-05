@@ -7,8 +7,16 @@ require_once __DIR__ . '/../assets/db.php';
 
 function ensure_store_schema(mysqli $conn): void
 {
+    $conn->query(
+        "CREATE TABLE IF NOT EXISTS categories (
+            id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(100) NOT NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
+    );
+
     $conn->query("ALTER TABLE products ADD COLUMN IF NOT EXISTS description TEXT NULL AFTER price");
     $conn->query("ALTER TABLE products MODIFY COLUMN image VARCHAR(255) DEFAULT NULL");
+    $conn->query("ALTER TABLE products ADD COLUMN IF NOT EXISTS category_id INT(11) NULL AFTER image");
 
     $conn->query(
         "CREATE TABLE IF NOT EXISTS orders (
@@ -35,6 +43,9 @@ function ensure_store_schema(mysqli $conn): void
             CONSTRAINT order_items_ibfk_1 FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
     );
+
+    $conn->query("ALTER TABLE order_items ADD COLUMN IF NOT EXISTS category_id INT(11) NULL AFTER product_id");
+    $conn->query("ALTER TABLE order_items ADD COLUMN IF NOT EXISTS category_name VARCHAR(100) DEFAULT NULL AFTER product_name");
 }
 
 ensure_store_schema($conn);
@@ -141,27 +152,58 @@ function product_short_description(?string $description, int $limit = 90): strin
     return mb_substr($description, 0, $limit - 3) . '...';
 }
 
-function fetch_all_products(mysqli $conn, string $search = ''): array
+function fetch_all_categories(mysqli $conn): array
+{
+    $result = $conn->query("SELECT id, name FROM categories ORDER BY id ASC");
+
+    return $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
+}
+
+function fetch_products(mysqli $conn, ?int $categoryId = null, string $search = '', ?int $limit = null): array
 {
     $search = trim($search);
+    $sql = "SELECT p.id, p.name, p.price, p.description, p.image, p.category_id, c.name AS category_name, p.created_at
+            FROM products p
+            LEFT JOIN categories c ON c.id = p.category_id";
+    $conditions = [];
+    $types = '';
+    $params = [];
+
+    if ($categoryId !== null) {
+        $conditions[] = 'p.category_id = ?';
+        $types .= 'i';
+        $params[] = $categoryId;
+    }
 
     if ($search !== '') {
-        $stmt = $conn->prepare("SELECT id, name, price, description, image, created_at FROM products WHERE name LIKE ? OR description LIKE ? ORDER BY id DESC");
+        $conditions[] = '(p.name LIKE ? OR p.description LIKE ? OR c.name LIKE ?)';
         $like = '%' . $search . '%';
-        $stmt->bind_param('ss', $like, $like);
+        $types .= 'sss';
+        $params[] = $like;
+        $params[] = $like;
+        $params[] = $like;
+    }
+
+    if (!empty($conditions)) {
+        $sql .= ' WHERE ' . implode(' AND ', $conditions);
+    }
+
+    $sql .= ' ORDER BY p.id DESC';
+
+    if ($limit !== null) {
+        $sql .= ' LIMIT ' . max(1, $limit);
+    }
+
+    if ($types !== '') {
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param($types, ...$params);
         $stmt->execute();
         $result = $stmt->get_result();
     } else {
-        $result = $conn->query("SELECT id, name, price, description, image, created_at FROM products ORDER BY id DESC");
+        $result = $conn->query($sql);
     }
 
-    $products = [];
-
-    if ($result) {
-        while ($row = $result->fetch_assoc()) {
-            $products[] = $row;
-        }
-    }
+    $products = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
 
     if (isset($stmt)) {
         $stmt->close();
@@ -170,17 +212,29 @@ function fetch_all_products(mysqli $conn, string $search = ''): array
     return $products;
 }
 
+function fetch_all_products(mysqli $conn, string $search = ''): array
+{
+    return fetch_products($conn, null, $search);
+}
+
+function fetch_products_by_category_id(mysqli $conn, int $categoryId, string $search = ''): array
+{
+    return fetch_products($conn, $categoryId, $search);
+}
+
 function fetch_recent_products(mysqli $conn, int $limit = 5): array
 {
-    $limit = max(1, $limit);
-    $result = $conn->query("SELECT id, name, price, description, image, created_at FROM products ORDER BY id DESC LIMIT $limit");
-
-    return $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
+    return fetch_products($conn, null, '', $limit);
 }
 
 function fetch_product_by_id(mysqli $conn, int $productId): ?array
 {
-    $stmt = $conn->prepare("SELECT id, name, price, description, image, created_at FROM products WHERE id = ?");
+    $stmt = $conn->prepare(
+        "SELECT p.id, p.name, p.price, p.description, p.image, p.category_id, c.name AS category_name, p.created_at
+         FROM products p
+         LEFT JOIN categories c ON c.id = p.category_id
+         WHERE p.id = ?"
+    );
     $stmt->bind_param('i', $productId);
     $stmt->execute();
     $product = $stmt->get_result()->fetch_assoc() ?: null;
@@ -196,6 +250,9 @@ function validate_product_data(array $input, bool $imageRequired = true): array
     $price = trim($input['price'] ?? '');
     $description = trim($input['description'] ?? '');
     $imageUrl = trim($input['image_url'] ?? '');
+    $categoryId = filter_var($input['category_id'] ?? null, FILTER_VALIDATE_INT, [
+        'options' => ['min_range' => 1],
+    ]);
 
     if ($name === '') {
         $errors[] = 'Product name is required.';
@@ -207,6 +264,10 @@ function validate_product_data(array $input, bool $imageRequired = true): array
 
     if ($description === '') {
         $errors[] = 'Product description is required.';
+    }
+
+    if ($categoryId === false) {
+        $errors[] = 'Please select a category.';
     }
 
     if ($imageUrl !== '' && !filter_var($imageUrl, FILTER_VALIDATE_URL)) {
@@ -223,6 +284,7 @@ function validate_product_data(array $input, bool $imageRequired = true): array
         'name' => $name,
         'price' => (int) round((float) $price),
         'description' => $description,
+        'category_id' => $categoryId === false ? 0 : (int) $categoryId,
         'image_url' => $imageUrl,
     ];
 }
@@ -291,20 +353,20 @@ function delete_product_image(?string $imageName): void
     }
 }
 
-function create_product(mysqli $conn, string $name, int $price, string $description, string $image): bool
+function create_product(mysqli $conn, string $name, int $price, string $description, string $image, int $categoryId): bool
 {
-    $stmt = $conn->prepare("INSERT INTO products (name, price, description, image) VALUES (?, ?, ?, ?)");
-    $stmt->bind_param('siss', $name, $price, $description, $image);
+    $stmt = $conn->prepare("INSERT INTO products (name, price, description, image, category_id) VALUES (?, ?, ?, ?, ?)");
+    $stmt->bind_param('sissi', $name, $price, $description, $image, $categoryId);
     $success = $stmt->execute();
     $stmt->close();
 
     return $success;
 }
 
-function update_product(mysqli $conn, int $id, string $name, int $price, string $description, string $image): bool
+function update_product(mysqli $conn, int $id, string $name, int $price, string $description, string $image, int $categoryId): bool
 {
-    $stmt = $conn->prepare("UPDATE products SET name = ?, price = ?, description = ?, image = ? WHERE id = ?");
-    $stmt->bind_param('sissi', $name, $price, $description, $image, $id);
+    $stmt = $conn->prepare("UPDATE products SET name = ?, price = ?, description = ?, image = ?, category_id = ? WHERE id = ?");
+    $stmt->bind_param('sissii', $name, $price, $description, $image, $categoryId, $id);
     $success = $stmt->execute();
     $stmt->close();
 
@@ -364,7 +426,12 @@ function get_cart_items(mysqli $conn): array
     $placeholders = implode(',', array_fill(0, count($ids), '?'));
     $types = str_repeat('i', count($ids));
 
-    $stmt = $conn->prepare("SELECT id, name, price, description, image FROM products WHERE id IN ($placeholders)");
+    $stmt = $conn->prepare(
+        "SELECT p.id, p.name, p.price, p.description, p.image, p.category_id, c.name AS category_name
+         FROM products p
+         LEFT JOIN categories c ON c.id = p.category_id
+         WHERE p.id IN ($placeholders)"
+    );
     $stmt->bind_param($types, ...$ids);
     $stmt->execute();
     $result = $stmt->get_result();
@@ -423,14 +490,25 @@ function place_order_from_cart(mysqli $conn, int $userId): bool
         $orderId = $conn->insert_id;
         $orderStmt->close();
 
-        $itemStmt = $conn->prepare("INSERT INTO order_items (order_id, product_id, product_name, product_price, quantity, subtotal) VALUES (?, ?, ?, ?, ?, ?)");
+        $itemStmt = $conn->prepare(
+            "INSERT INTO order_items (order_id, product_id, category_id, product_name, category_name, product_price, quantity, subtotal)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        );
 
         foreach ($cart['items'] as $item) {
+            $categoryId = isset($item['category_id']) ? (int) $item['category_id'] : null;
+            $categoryName = trim((string) ($item['category_name'] ?? ''));
+            if ($categoryName === '') {
+                $categoryName = 'Uncategorized';
+            }
+
             $itemStmt->bind_param(
-                'iisiii',
+                'iiissiii',
                 $orderId,
                 $item['id'],
+                $categoryId,
                 $item['name'],
+                $categoryName,
                 $item['price'],
                 $item['quantity'],
                 $item['subtotal']
@@ -451,7 +529,27 @@ function place_order_from_cart(mysqli $conn, int $userId): bool
 
 function fetch_user_orders(mysqli $conn, int $userId): array
 {
-    $stmt = $conn->prepare("SELECT id, total_amount, status, created_at FROM orders WHERE user_id = ? ORDER BY id DESC");
+    $stmt = $conn->prepare(
+        "SELECT o.id, o.total_amount, o.status, o.created_at,
+                COALESCE(
+                    GROUP_CONCAT(
+                        CONCAT(
+                            oi.product_name,
+                            ' (',
+                            COALESCE(NULLIF(oi.category_name, ''), 'Uncategorized'),
+                            ') x',
+                            oi.quantity
+                        )
+                        ORDER BY oi.id ASC SEPARATOR ', '
+                    ),
+                    ''
+                ) AS items_summary
+         FROM orders o
+         LEFT JOIN order_items oi ON oi.order_id = o.id
+         WHERE o.user_id = ?
+         GROUP BY o.id, o.total_amount, o.status, o.created_at
+         ORDER BY o.id DESC"
+    );
     $stmt->bind_param('i', $userId);
     $stmt->execute();
     $orders = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
@@ -463,10 +561,25 @@ function fetch_user_orders(mysqli $conn, int $userId): array
 function fetch_admin_orders(mysqli $conn): array
 {
     $result = $conn->query(
-        "SELECT orders.id, orders.total_amount, orders.status, orders.created_at, users.name AS user_name, users.email
-         FROM orders
-         INNER JOIN users ON users.id = orders.user_id
-         ORDER BY orders.id DESC"
+        "SELECT o.id, o.total_amount, o.status, o.created_at, users.name AS user_name, users.email,
+                COALESCE(
+                    GROUP_CONCAT(
+                        CONCAT(
+                            oi.product_name,
+                            ' (',
+                            COALESCE(NULLIF(oi.category_name, ''), 'Uncategorized'),
+                            ') x',
+                            oi.quantity
+                        )
+                        ORDER BY oi.id ASC SEPARATOR ', '
+                    ),
+                    ''
+                ) AS items_summary
+         FROM orders o
+         INNER JOIN users ON users.id = o.user_id
+         LEFT JOIN order_items oi ON oi.order_id = o.id
+         GROUP BY o.id, o.total_amount, o.status, o.created_at, users.name, users.email
+         ORDER BY o.id DESC"
     );
 
     return $result ? $result->fetch_all(MYSQLI_ASSOC) : [];

@@ -5,6 +5,7 @@ require_admin();
 
 $productId = isset($_GET['id']) ? (int) $_GET['id'] : 0;
 $product = fetch_product_by_id($conn, $productId);
+$categories = fetch_all_categories($conn);
 
 if (!$product) {
   set_flash('error', 'Product not found.');
@@ -22,7 +23,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!$imageResult['success']) {
       $errors[] = $imageResult['message'];
-    } elseif (update_product($conn, $productId, $validated['name'], $validated['price'], $validated['description'], $imageResult['filename'])) {
+    } elseif (update_product($conn, $productId, $validated['name'], $validated['price'], $validated['description'], $imageResult['filename'], $validated['category_id'])) {
       if ($imageResult['filename'] !== $product['image']) {
         delete_product_image($product['image']);
       }
@@ -37,6 +38,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $product['name'] = $validated['name'];
   $product['price'] = $validated['price'];
   $product['description'] = $validated['description'];
+  $product['category_id'] = $validated['category_id'];
+  foreach ($categories as $category) {
+    if ((int) $category['id'] === (int) $validated['category_id']) {
+      $product['category_name'] = $category['name'];
+      break;
+    }
+  }
   if (!empty($validated['image_url'])) {
     $product['image'] = $validated['image_url'];
   }
@@ -91,6 +99,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <form method="POST" enctype="multipart/form-data">
           <input type="text" name="name" placeholder="Product Name" required class="input-field" value="<?php echo e($product['name']); ?>">
           <input type="number" name="price" placeholder="Price" required class="input-field" value="<?php echo e((string) $product['price']); ?>">
+          <select name="category_id" required class="input-field">
+            <option value="">Select Category</option>
+            <?php foreach ($categories as $category): ?>
+              <option value="<?php echo e((string) $category['id']); ?>" <?php echo (string) ($product['category_id'] ?? '') === (string) $category['id'] ? 'selected' : ''; ?>>
+                <?php echo e($category['name']); ?>
+              </option>
+            <?php endforeach; ?>
+          </select>
           <textarea name="description" placeholder="Product Description" required class="input-field text-area-field"><?php echo e($product['description']); ?></textarea>
           <div class="file-input-wrapper">
             <label>Change Product Image:</label>
@@ -105,6 +121,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
               </div>
               <div class="product-body">
                 <h3><?php echo e($product['name']); ?></h3>
+                <p class="muted"><?php echo e($product['category_name'] ?? 'Uncategorized'); ?></p>
                 <p class="price">Rs <?php echo e((string) $product['price']); ?></p>
                 <p class="product-desc"><?php echo e(product_short_description($product['description'], 120)); ?></p>
               </div>

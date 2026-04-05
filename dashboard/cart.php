@@ -98,8 +98,9 @@ $cart = get_cart_totals($conn);
                   <div class="cart-thumb">
                     <img src="<?php echo e(product_image_src($item['image'])); ?>" alt="<?php echo e($item['name']); ?>">
                   </div>
-                  <div>
+                  <div class="cart-item-details">
                     <h3><?php echo e($item['name']); ?></h3>
+                    <p class="muted">Category: <?php echo e($item['category_name'] ?? 'Uncategorized'); ?></p>
                     <p class="muted">Rs <?php echo e((string) $item['price']); ?> each</p>
                     <p class="cart-desc"><?php echo e(product_short_description($item['description'], 80)); ?></p>
                     <p class="price">Subtotal: Rs <?php echo e((string) $item['subtotal']); ?></p>

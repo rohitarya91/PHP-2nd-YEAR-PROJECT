@@ -14,6 +14,7 @@ $formData = [
   'name' => '',
   'price' => '',
   'description' => '',
+  'category_id' => '',
   'image_url' => '',
 ];
 
@@ -25,6 +26,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     'name' => $validated['name'],
     'price' => (string) $validated['price'],
     'description' => $validated['description'],
+    'category_id' => (string) $validated['category_id'],
     'image_url' => $validated['image_url'],
   ];
 
@@ -33,7 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!$imageResult['success']) {
       $errors[] = $imageResult['message'];
-    } elseif (create_product($conn, $validated['name'], $validated['price'], $validated['description'], $imageResult['filename'])) {
+    } elseif (create_product($conn, $validated['name'], $validated['price'], $validated['description'], $imageResult['filename'], $validated['category_id'])) {
       set_flash('success', 'Product added successfully.');
       redirect_to('dashboard.php?section=products');
     } else {
@@ -43,6 +45,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $counts = get_dashboard_counts($conn);
+$categories = fetch_all_categories($conn);
 $products = fetch_all_products($conn, $search);
 $recentProducts = fetch_recent_products($conn);
 $orders = fetch_admin_orders($conn);
@@ -66,7 +69,9 @@ $pageSubtitle = $pageTitles[$section][1] ?? $pageTitles['dashboard'][1];
   <title>Admin Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Merriweather:wght@300;400;700;900&family=Open+Sans:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Merriweather:wght@300;400;700;900&family=Open+Sans:wght@300;400;600;700&display=swap"
+    rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <link rel="stylesheet" href="../assets/css/dashbord_style.css">
   <style>
@@ -81,8 +86,14 @@ $pageSubtitle = $pageTitles[$section][1] ?? $pageTitles['dashboard'][1];
 </head>
 
 <body class="page">
+  <header>
+
+  </header>
   <div class="page-shell">
-    <aside class="glass-panel side-panel">
+    <aside id="admin-side-panel" class="glass-panel side-panel">
+      <button type="button" class="side-panel-close" onclick="closeAdminMenu()" aria-label="Close menu">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
       <div class="profile-card">
         <div class="profile-avatar"><?php echo e($avatarLetter); ?></div>
         <h3>Welcome, <?php echo $safeName; ?></h3>
@@ -90,10 +101,18 @@ $pageSubtitle = $pageTitles[$section][1] ?? $pageTitles['dashboard'][1];
       </div>
 
       <ul class="nav-list">
-        <li><a href="#" onclick="showAdminSection('dashboard', event)" class="<?php echo $section === 'dashboard' ? 'active' : ''; ?>"><i class="fa-solid fa-chart-line"></i> Dashboard</a></li>
-        <li><a href="#" onclick="showAdminSection('products', event)" class="<?php echo $section === 'products' ? 'active' : ''; ?>"><i class="fa-solid fa-box"></i> All Products</a></li>
-        <li><a href="#" onclick="showAdminSection('orders', event)" class="<?php echo $section === 'orders' ? 'active' : ''; ?>"><i class="fa-solid fa-cart-shopping"></i> All Orders</a></li>
-        <li><a href="#" onclick="showAdminSection('add-product', event)" class="<?php echo $section === 'add-product' ? 'active' : ''; ?>"><i class="fa-solid fa-plus"></i> Add Product</a></li>
+        <li><a href="#" onclick="showAdminSection('dashboard', event)"
+            class="<?php echo $section === 'dashboard' ? 'active' : ''; ?>"><i class="fa-solid fa-chart-line"></i>
+            Dashboard</a></li>
+        <li><a href="#" onclick="showAdminSection('products', event)"
+            class="<?php echo $section === 'products' ? 'active' : ''; ?>"><i class="fa-solid fa-box"></i> All
+            Products</a></li>
+        <li><a href="#" onclick="showAdminSection('orders', event)"
+            class="<?php echo $section === 'orders' ? 'active' : ''; ?>"><i class="fa-solid fa-cart-shopping"></i> All
+            Orders</a></li>
+        <li><a href="#" onclick="showAdminSection('add-product', event)"
+            class="<?php echo $section === 'add-product' ? 'active' : ''; ?>"><i class="fa-solid fa-plus"></i> Add
+            Product</a></li>
         <li><a href="../auth/logout.php"><i class="fa-solid fa-right-from-bracket"></i> Logout</a></li>
       </ul>
 
@@ -101,9 +120,19 @@ $pageSubtitle = $pageTitles[$section][1] ?? $pageTitles['dashboard'][1];
         <p class="muted">Signed in as <?php echo $safeName; ?></p>
       </div>
     </aside>
+    <div class="menu-overlay" onclick="closeAdminMenu()" aria-hidden="true"></div>
 
     <main class="glass-panel main-panel">
       <div class="panel-header">
+        <button
+          type="button"
+          class="menu-toggle"
+          onclick="toggleAdminMenu()"
+          aria-label="Toggle admin menu"
+          aria-controls="admin-side-panel"
+          aria-expanded="false">
+          <i class="fa fa-bars"></i>
+        </button>
         <div class="panel-title">
           <h1 id="admin-page-title"><?php echo e($pageTitle); ?></h1>
           <p class="muted" id="admin-page-subtitle"><?php echo e($pageSubtitle); ?></p>
@@ -120,7 +149,8 @@ $pageSubtitle = $pageTitles[$section][1] ?? $pageTitles['dashboard'][1];
       </div>
 
       <?php if ($flash): ?>
-        <div class="content-card message-card <?php echo $flash['type'] === 'success' ? 'success-card' : 'error-card'; ?>">
+        <div
+          class="content-card message-card <?php echo $flash['type'] === 'success' ? 'success-card' : 'error-card'; ?>">
           <p><?php echo e($flash['message']); ?></p>
         </div>
       <?php endif; ?>
@@ -166,7 +196,9 @@ $pageSubtitle = $pageTitles[$section][1] ?? $pageTitles['dashboard'][1];
           <?php else: ?>
             <?php foreach ($recentProducts as $recentProduct): ?>
               <div class="order-item">
-                <p><?php echo e($recentProduct['name']); ?> was added on <?php echo e(date('d M Y, h:i A', strtotime($recentProduct['created_at']))); ?></p>
+                <p><?php echo e($recentProduct['name']); ?> was added on
+                  <?php echo e(date('d M Y, h:i A', strtotime($recentProduct['created_at']))); ?>
+                </p>
               </div>
             <?php endforeach; ?>
           <?php endif; ?>
@@ -182,7 +214,8 @@ $pageSubtitle = $pageTitles[$section][1] ?? $pageTitles['dashboard'][1];
             </div>
             <form method="GET" class="search-form">
               <input type="hidden" name="section" value="products">
-              <input type="text" name="search" value="<?php echo e($search); ?>" placeholder="Search products..." class="search-input">
+              <input type="text" name="search" value="<?php echo e($search); ?>" placeholder="Search products..."
+                class="search-input">
               <button type="submit" class="btn-ghost"><i class="fa-solid fa-magnifying-glass"></i> Search</button>
             </form>
           </div>
@@ -202,6 +235,7 @@ $pageSubtitle = $pageTitles[$section][1] ?? $pageTitles['dashboard'][1];
 
                 <div class="product-body">
                   <h3><?php echo e($row['name']); ?></h3>
+                  <p class="muted"><?php echo e($row['category_name'] ?? 'Uncategorized'); ?></p>
                   <p class="price">Rs <?php echo e((string) $row['price']); ?></p>
                   <p class="product-desc"><?php echo e(product_short_description($row['description'], 110)); ?></p>
                   <p class="muted">Added on <?php echo e(date('d M Y', strtotime($row['created_at']))); ?></p>
@@ -209,8 +243,11 @@ $pageSubtitle = $pageTitles[$section][1] ?? $pageTitles['dashboard'][1];
 
                 <div class="product-footer">
                   <div class="admin-actions full-actions">
-                    <a href="edit_product.php?id=<?php echo e((string) $row['id']); ?>" class="action-btn edit-btn"><i class="fa-solid fa-pen"></i> Edit</a>
-                    <a href="delete_product.php?id=<?php echo e((string) $row['id']); ?>" class="action-btn delete-btn-link" onclick="return confirm('Delete this product?');"><i class="fa-solid fa-trash"></i> Delete</a>
+                    <a href="edit_product.php?id=<?php echo e((string) $row['id']); ?>" class="action-btn edit-btn"><i
+                        class="fa-solid fa-pen"></i> Edit</a>
+                    <a href="delete_product.php?id=<?php echo e((string) $row['id']); ?>"
+                      class="action-btn delete-btn-link" onclick="return confirm('Delete this product?');"><i
+                        class="fa-solid fa-trash"></i> Delete</a>
                   </div>
                 </div>
               </div>
@@ -228,7 +265,13 @@ $pageSubtitle = $pageTitles[$section][1] ?? $pageTitles['dashboard'][1];
           <?php else: ?>
             <?php foreach ($orders as $order): ?>
               <div class="order-item">
-                <p>#<?php echo e((string) $order['id']); ?> | <?php echo e($order['user_name']); ?> | <?php echo e($order['email']); ?> | Rs <?php echo e((string) $order['total_amount']); ?> | <?php echo e($order['status']); ?></p>
+                <p>#<?php echo e((string) $order['id']); ?> | <?php echo e($order['user_name']); ?> |
+                  <?php echo e($order['email']); ?> | Rs <?php echo e((string) $order['total_amount']); ?> |
+                  <?php echo e($order['status']); ?>
+                </p>
+                <?php if (!empty($order['items_summary'])): ?>
+                  <p class="muted"><?php echo e($order['items_summary']); ?></p>
+                <?php endif; ?>
               </div>
             <?php endforeach; ?>
           <?php endif; ?>
@@ -238,16 +281,29 @@ $pageSubtitle = $pageTitles[$section][1] ?? $pageTitles['dashboard'][1];
       <section id="add-product-section" class="section-page <?php echo $section === 'add-product' ? 'active' : ''; ?>">
         <div class="content-card section-card">
           <h2>Add Product</h2>
-          <p class="muted section-subtext">Upload an image file or paste an image URL. If both are provided, the uploaded file is used first.</p>
+          <p class="muted section-subtext">Upload an image file or paste an image URL. If both are provided, the
+            uploaded file is used first.</p>
           <form method="POST" enctype="multipart/form-data">
-            <input type="text" name="name" placeholder="Product Name" required class="input-field" value="<?php echo e($formData['name']); ?>">
-            <input type="number" name="price" placeholder="Price" required class="input-field" value="<?php echo e($formData['price']); ?>">
-            <textarea name="description" placeholder="Product Description" required class="input-field text-area-field"><?php echo e($formData['description']); ?></textarea>
+            <input type="text" name="name" placeholder="Product Name" required class="input-field"
+              value="<?php echo e($formData['name']); ?>">
+            <input type="number" name="price" placeholder="Price" required class="input-field"
+              value="<?php echo e($formData['price']); ?>">
+            <select name="category_id" required class="input-field ">
+              <option value="" style="color: #555;">Select Category</option>
+              <?php foreach ($categories as $category): ?>
+                <option value="<?php echo e((string) $category['id']); ?>" <?php echo $formData['category_id'] === (string) $category['id'] ? 'selected' : ''; ?> style="color: #555;">
+                  <?php echo e($category['name']); ?>
+                </option>
+              <?php endforeach; ?>
+            </select>
+            <textarea name="description" placeholder="Product Description" required
+              class="input-field text-area-field"><?php echo e($formData['description']); ?></textarea>
             <div class="file-input-wrapper">
               <label>Upload Product Image:</label>
               <input type="file" name="image" class="input-field" accept=".jpg,.jpeg,.png,.webp">
             </div>
-            <input type="url" name="image_url" placeholder="Or paste image URL" class="input-field" value="<?php echo e($formData['image_url']); ?>">
+            <input type="url" name="image_url" placeholder="Or paste image URL" class="input-field"
+              value="<?php echo e($formData['image_url']); ?>">
             <button type="submit" class="btn-primary full-width">Add Product</button>
           </form>
         </div>
@@ -258,6 +314,9 @@ $pageSubtitle = $pageTitles[$section][1] ?? $pageTitles['dashboard'][1];
 
 </html>
 <script>
+  const adminSidebar = document.getElementById('admin-side-panel');
+  const adminMenuToggle = document.querySelector('.menu-toggle');
+  const adminMenuOverlay = document.querySelector('.menu-overlay');
   const sectionMeta = {
     dashboard: {
       title: 'Admin Dashboard',
@@ -312,9 +371,46 @@ $pageSubtitle = $pageTitles[$section][1] ?? $pageTitles['dashboard'][1];
   function showAdminSection(section, event) {
     event.preventDefault();
     activateAdminSection(section);
+    closeAdminMenu();
   }
 
   function openAdminSection(section) {
     activateAdminSection(section);
+    closeAdminMenu();
   }
+
+  function setAdminMenuState(isOpen) {
+    if (!adminSidebar || !adminMenuToggle || !adminMenuOverlay) {
+      return;
+    }
+
+    adminSidebar.classList.toggle('active', isOpen);
+    adminMenuOverlay.classList.toggle('active', isOpen);
+    document.body.classList.toggle('menu-open', isOpen);
+    adminMenuToggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  }
+
+  function toggleAdminMenu() {
+    if (window.innerWidth > 768) {
+      return;
+    }
+
+    setAdminMenuState(!adminSidebar.classList.contains('active'));
+  }
+
+  function closeAdminMenu() {
+    setAdminMenuState(false);
+  }
+
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      closeAdminMenu();
+    }
+  });
+
+  window.addEventListener('resize', () => {
+    if (window.innerWidth > 768) {
+      closeAdminMenu();
+    }
+  });
 </script>
