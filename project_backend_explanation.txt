@@ -1,0 +1,948 @@
+FULL PROJECT BACKEND EXPLANATION
+Hinglish Version
+Project: Harvest Fresh PHP Grocery Store
+Main Helper File: config/store.php
+Legacy Helper File: includes/store.php
+
+IMPORTANT NOTE
+- Current project ka real backend logic `config/store.php` se chal raha hai.
+- `includes/store.php` ek purana helper version hai. Yeh ab main active flow ka center nahi hai.
+- Agar aapko pura project ka backend samajhna hai, to sabse pehle in files ko samjho:
+  1. `config/store.php`
+  2. `auth/*.php`
+  3. `dashboard/*.php`
+  4. `api/*.php`
+  5. `account/account.php`
+
+==================================================
+1. YE PROJECT OVERALL KYA KARTA HAI
+==================================================
+
+Yeh ek mini grocery e-commerce project hai jo PHP + MySQL + HTML + CSS + JS se bana hai.
+
+Simple language me is project me ye features hain:
+- Public landing page
+- User registration
+- User login
+- Admin aur normal user ka alag access
+- Products category ke hisaab se dekhna
+- Session based cart
+- Order place karna
+- Delivery address/profile save karna
+- Admin product manage kar sakta hai
+- Admin orders dekh sakta hai
+
+Real life example:
+- Visitor website open karta hai
+- Products dekhta hai
+- User sign up karta hai
+- Login karta hai
+- Dashboard me products browse karta hai
+- Cart me add karta hai
+- Address save karta hai
+- Order place karta hai
+- Admin dashboard se admin sab control karta hai
+
+==================================================
+2. PROJECT FILE MAP
+==================================================
+
+ROOT
+- `index.php`
+  Public website / landing page
+
+AUTH
+- `auth/login.php`
+  Login handle karta hai
+- `auth/register.php`
+  User register karta hai
+- `auth/logout.php`
+  Session destroy karke logout karta hai
+- `auth/auth.php`
+  Purana auth gate file hai, current main architecture ka center nahi
+
+CONFIG
+- `config/store.php`
+  Ye project ka main backend helper hai
+  Isme session, DB helper, products, cart, orders, profile, access control sab hai
+
+ACCOUNT
+- `account/account.php`
+  User apni profile aur delivery address yahan update karta hai
+
+USER SIDE
+- `dashboard/user_dashboard.php`
+  Customer dashboard
+- `dashboard/cart.php`
+  Cart page aur checkout flow
+
+ADMIN SIDE
+- `dashboard/dashboard.php`
+  Admin overview, products, orders, add product
+- `dashboard/edit_product.php`
+  Product edit
+- `dashboard/delete_product.php`
+  Product delete
+
+API
+- `api/products.php`
+  Products JSON me deta hai
+- `api/cart.php`
+  AJAX se cart update karta hai
+
+DATABASE
+- `assets/db.php`
+  Database connection
+- `shopdb.sql`
+  SQL dump / initial schema
+
+FRONTEND SUPPORT
+- `assets/css/style.css`
+  Login/register UI
+- `assets/css/dashboard.css`
+  User dashboard + cart UI
+- `assets/css/dashbord_style.css`
+  Admin dashboard UI
+- `assets/css/account.css`
+  Account page UI
+- `assets/js/auth.js`
+  Auth pages ki form behavior
+
+==================================================
+3. BACKEND ARCHITECTURE 
+==================================================
+
+Is project ka backend helper-based architecture follow karta hai.
+
+Meaning:
+- Har page me alag alag SQL aur session logic likhne ke bajay,
+  shared backend logic `config/store.php` me rakha gaya hai.
+
+To page files ka main kaam hota hai:
+1. helper include karna
+2. login/access check karna
+3. required helper function call karna
+4. result ko HTML me dikhana
+
+Yeh approach better hai kyunki:
+- code repeat nahi hota
+- logic ek jagah central rehta hai
+- maintenance easy hoti hai
+
+==================================================
+4. SABSE IMPORTANT FILE: config/store.php
+==================================================
+
+`config/store.php` is project ki backbone hai.
+
+Ye file handle karti hai:
+- session startup
+- DB helper loading
+- schema auto upgrade
+- auth helper
+- admin/user access helper
+- safe output helper
+- flash messages
+- profile helper
+- address helper
+- products helper
+- image helper
+- cart helper
+- checkout helper
+- orders helper
+- dashboard counts helper
+
+Simple socho:
+- agar pura project ek body hai,
+- to `config/store.php` uska heart + brain combo hai.
+
+==================================================
+5. SESSION HANDLING
+==================================================
+
+Session `config/store.php` me start hota hai:
+- `session_start()`
+- aur yeh tabhi chalta hai jab session already active na ho
+
+Main session values:
+- `user_id`
+- `user_name`
+- `email`
+- `role`
+- `cart`
+- `flash`
+
+Inka meaning:
+- `user_id`
+  current logged-in user ko identify karta hai
+- `user_name`
+  dashboard me naam dikhane ke kaam aata hai
+- `email`
+  identity aur display ke kaam aata hai
+- `role`
+  admin hai ya user, yeh batata hai
+- `cart`
+  cart items session me store karta hai
+- `flash`
+  one-time success/error message ke liye
+
+Example:
+- user login karta hai
+- session me `user_id`, `user_name`, `email`, `role` save ho jata hai
+- fir next page par project ko turant pata hota hai ki kaun login hai
+
+==================================================
+6. DATABASE CONNECTION
+==================================================
+
+Database connection `assets/db.php` se aata hai.
+
+Basic kaam:
+- MySQL se connect karna
+- `shopdb` database use karna
+- charset `utf8mb4` set karna
+
+`utf8mb4` kyun important hai:
+- text safely store hota hai
+- modern character support better hoti hai
+
+==================================================
+7. AUTO SCHEMA MANAGEMENT
+==================================================
+
+Function:
+- `ensure_store_schema(mysqli $conn): void`
+
+Ye function kya karta hai:
+- missing tables create karta hai
+- missing columns add karta hai
+- old database ko new features ke saath compatible banata hai
+
+Current important auto-managed fields:
+
+Users table me:
+- `role`
+- `phone_number`
+- `address_line1`
+- `address_line2`
+- `city`
+- `state`
+- `postal_code`
+
+Orders table me:
+- `shipping_name`
+- `shipping_phone`
+- `shipping_address`
+
+Products table me:
+- `description`
+- `category_id`
+
+Order items table me:
+- `category_id`
+- `category_name`
+
+Iska fayda:
+- Agar old DB hai aur aap new code run karte ho,
+  to required columns automatically add ho sakte hain
+
+Professional note:
+- development ke liye achha hai
+- bade projects me ye kaam migrations system karta hai
+
+==================================================
+8. ROLE-BASED ACCESS CONTROL
+==================================================
+
+Ab project role-based auth use karta hai.
+
+Main helpers:
+- `require_login()`
+- `is_admin()`
+- `require_admin()`
+- `current_user_role()`
+
+Kaise kaam karta hai:
+- `require_login()`
+  guest ko protected page par jane se rokta hai
+- `is_admin()`
+  check karta hai session role admin hai ya nahi
+- `require_admin()`
+  sirf admin ko admin pages me jane deta hai
+
+Login ke time session me store hota hai:
+- `$_SESSION['role']`
+
+Register ke time default role save hota hai:
+- `user`
+
+Schema helper existing admin ko auto sync karta hai:
+- `admin@gmail.com` ko `admin` role milta hai
+
+Yeh pehle wale hardcoded email check se better hai kyunki:
+- scalable hai
+- clean architecture hai
+- future me aur roles add kar sakte ho
+
+==================================================
+9. OUTPUT SAFETY
+==================================================
+
+Helper:
+- `e(?string $value): string`
+
+Ye basically `htmlspecialchars()` ko wrap karta hai.
+
+Iska use kyun:
+- user ka naam
+- product ka naam
+- address
+- flash message
+- kisi bhi text ko HTML me safe print karne ke liye
+
+Fayda:
+- XSS jaisa risk kam hota hai
+
+==================================================
+10. FLASH MESSAGES
+==================================================
+
+Helpers: 
+- `set_flash(string $type, string $message)`
+- `get_flash(): ?array`
+
+Kaam:
+- ek baar ka message session me store karna
+- next page load par dikhana
+- fir remove kar dena
+
+Use case:
+- Product added successfully
+- Order placed successfully
+- Invalid login
+- Product deleted
+
+Ye Post-Redirect-Get flow ke liye best pattern hai.
+
+==================================================
+11. USER PROFILE AUR DELIVERY ADDRESS
+==================================================
+
+Main helpers:
+- `fetch_user_profile()`
+- `validate_user_profile_data()`
+- `update_user_profile()`
+- `build_user_delivery_address()`
+- `has_complete_delivery_profile()`
+- `user_has_complete_delivery_profile()`
+- `get_user_delivery_snapshot()`
+
+Inka role:
+
+`fetch_user_profile()`
+- user ka profile DB se laata hai
+- name, email, role, phone, address fields
+
+`validate_user_profile_data()`
+- user ka form validate karta hai
+- name
+- phone
+- city
+- state
+- postal code
+- address line 1
+
+`update_user_profile()`
+- DB me profile update karta hai
+- session ka `user_name` bhi refresh karta hai
+
+`build_user_delivery_address()`
+- alag alag address fields ko jodkar full readable address banata hai
+
+`has_complete_delivery_profile()`
+- check karta hai ki checkout ke liye required data complete hai ya nahi
+
+`get_user_delivery_snapshot()`
+- order place hone ke time ek delivery snapshot banata hai
+
+Ye bahut important professional improvement hai:
+- order place hote time current address snapshot save hota hai
+- baad me agar user apna address change kar de,
+  purane order ka delivery data fir bhi safe rehta hai
+
+==================================================
+12. PRODUCT AUR CATEGORY BACKEND
+==================================================
+
+Main helpers:
+- `fetch_all_categories()`
+- `fetch_products()`
+- `fetch_all_products()`
+- `fetch_products_by_category_id()`
+- `fetch_recent_products()`
+- `fetch_product_by_id()`
+- `validate_product_data()`
+- `handle_product_image_upload()`
+- `resolve_product_image()`
+- `create_product()`
+- `update_product()`
+- `delete_product()`
+
+Most important function:
+- `fetch_products()`
+
+Ye function support karta hai:
+- category filter
+- search filter
+- limit
+
+SQL idea:
+- `products` table se data lao
+- `categories` table join karo
+- optional filters lagao
+- latest product pehle dikhao
+
+`validate_product_data()`
+- name check
+- price check
+- description check
+- category check
+- image URL check
+
+`resolve_product_image()`
+- agar file upload hai to file use karo
+- warna image URL use karo
+- edit flow me old image retain kar sakte ho
+
+==================================================
+13. IMAGE HANDLING
+==================================================
+
+Image related helpers:
+- `is_external_image()`
+- `product_image_src()`
+- `handle_product_image_upload()`
+- `delete_product_image()`
+
+Project me product image do tarah ki ho sakti hai:
+1. uploaded local image
+2. external image URL
+
+`product_image_src()`
+decide karta hai:
+- URL direct use karna hai
+- ya uploads folder ka path lagana hai
+- ya placeholder image deni hai
+
+`handle_product_image_upload()`
+check karta hai:
+- valid file hai ya nahi
+- size
+- extension
+- fir uploads folder me save karta hai
+
+==================================================
+14. CART BACKEND
+==================================================
+
+Cart session based hai.
+
+Main helpers:
+- `ensure_cart_exists()`
+- `add_to_cart()`
+- `update_cart_item()`
+- `remove_cart_item()`
+- `get_cart_items()`
+- `get_cart_totals()`
+
+Session cart structure:
+- key = product id
+- value = quantity
+
+Example:
+- Product ID 12 ko 3 quantity add kiya
+- session cart me something like:
+  `$_SESSION['cart'][12] = 3`
+
+`get_cart_items()`
+- session se IDs leta hai
+- products DB se laata hai
+- quantity aur subtotal calculate karta hai
+
+`get_cart_totals()`
+- total items count
+- total amount
+
+Session cart chhote projects ke liye kaafi useful hota hai:
+- simple
+- fast
+- alag cart table ki zarurat nahi
+
+==================================================
+15. ORDER BACKEND
+==================================================
+
+Main helpers:
+- `place_order_from_cart()`
+- `fetch_user_orders()`
+- `fetch_admin_orders()`
+
+`place_order_from_cart()`
+step by step:
+1. cart load hota hai
+2. delivery profile snapshot load hota hai
+3. agar cart empty hai ya address incomplete hai to order fail
+4. transaction start hoti hai
+5. `orders` table me order insert hota hai
+6. `order_items` me har item insert hota hai
+7. commit hota hai
+8. cart clear hota hai
+
+Professional improvement:
+- order me `shipping_name`, `shipping_phone`, `shipping_address` save hota hai
+
+`fetch_user_orders()`
+- sirf logged-in user ke orders laata hai
+- items summary bhi build karta hai
+
+`fetch_admin_orders()`
+- sab users ke orders laata hai
+- user name
+- email
+- shipping details
+- items summary
+
+==================================================
+16. ADMIN DASHBOARD COUNTS
+==================================================
+
+Helper:
+- `get_dashboard_counts()`
+
+Ye return karta hai:
+- total products
+- total users
+- total orders
+- total sales
+
+Admin dashboard ko ye data overview cards ke liye milta hai.
+
+==================================================
+17. PUBLIC PAGE: index.php
+==================================================
+
+`index.php` public website ka main landing page hai.
+
+Is file ka backend role:
+- categories load karna
+- initial products load karna
+- logged-in status check karna
+- CTA decide karna ki Login dikhana hai ya Dashboard
+
+Important improvement:
+- agar user already login hai,
+  to homepage button usko dashboard pe le jata hai
+
+==================================================
+18. LOGIN FLOW: auth/login.php
+==================================================
+
+`auth/login.php` ka kaam:
+- form data lena
+- email validate karna
+- password validate karna
+- DB me user check karna
+- `password_verify()` se password match karna
+- session regenerate karna
+- session values save karna
+- role ke hisaab se redirect karna
+
+Session me save hota hai:
+- user_id
+- user_name
+- email
+- role
+
+Admin redirect:
+- `dashboard/dashboard.php`
+
+User redirect:
+- `dashboard/user_dashboard.php`
+
+==================================================
+19. REGISTER FLOW: auth/register.php
+==================================================
+
+`auth/register.php` ka kaam:
+- name, email, password validate karna
+- duplicate email check karna
+- password hash karna
+- new user insert karna
+- default role `user` set karna
+- success flash ke saath login page pe bhejna
+
+Iska fayda:
+- plain password DB me save nahi hota
+- email duplicate issue control hota hai
+
+==================================================
+20. LOGOUT FLOW: auth/logout.php
+==================================================
+
+Simple flow:
+- session start
+- session destroy
+- homepage redirect
+
+Result:
+- user logout ho jata hai
+- cart aur auth session clear ho jata hai
+
+==================================================
+21. USER DASHBOARD: dashboard/user_dashboard.php
+==================================================
+
+Ye customer side ka main dashboard hai.
+
+Kaam:
+- guest ko block karta hai
+- admin ko user dashboard me aane se rokta hai
+- categories load karta hai
+- products load karta hai
+- orders load karta hai
+- cart totals load karta hai
+- profile load karta hai
+
+Sections:
+- home
+- shop
+- orders
+- profile
+
+Frontend features:
+- category filter
+- AJAX add to cart
+- responsive sidebar
+- profile quick actions
+
+Backend ka actual major logic:
+- `config/store.php` se aata hai
+
+==================================================
+22. CART PAGE: dashboard/cart.php
+==================================================
+
+Ye page handle karta hai:
+- cart update
+- quantity change
+- remove item
+- checkout
+- delivery details preview
+
+Important professional improvement:
+- agar delivery profile complete nahi hai,
+  to checkout allow nahi hota
+- user ko account address form complete karne ke liye bola jata hai
+
+Isse checkout realistic aur safe banta hai.
+
+==================================================
+23. ACCOUNT PAGE: account/account.php
+==================================================
+
+Ye file user ko allow karti hai:
+- profile dekhna
+- full name update karna
+- phone number update karna
+- delivery address save/update karna
+
+Fields:
+- full name
+- phone number
+- address line 1
+- address line 2
+- city
+- state
+- postal code
+
+Save ke baad:
+- data DB me update hota hai
+- success flash milta hai
+- user profile section me wapas redirect hota hai
+
+==================================================
+24. ADMIN DASHBOARD: dashboard/dashboard.php
+==================================================
+
+Ye admin ka main control panel hai.
+
+Isme admin:
+- store overview dekhta hai
+- products search kar sakta hai
+- products list dekh sakta hai
+- orders dekh sakta hai
+- new product add kar sakta hai
+
+Professional improvement:
+- admin order list me delivery contact aur delivery address bhi dikh raha hai
+
+==================================================
+25. EDIT PRODUCT: dashboard/edit_product.php
+==================================================
+
+Ye file:
+- ek product load karti hai
+- categories load karti hai
+- updated data validate karti hai
+- image replace karne deti hai
+- old image ko safely handle karti hai
+
+Agar new local image aayi aur old local image thi,
+to old image file delete bhi ho sakti hai.
+
+==================================================
+26. DELETE PRODUCT: dashboard/delete_product.php
+==================================================
+
+Ye file:
+- product check karti hai
+- dekh leti hai ki product kisi old order me use hua hai ya nahi
+- agar old order me use hua hai to delete block kar deti hai
+- warna delete allow karti hai
+
+Ye bahut important professional behavior hai,
+kyunki old order history break nahi honi chahiye.
+
+==================================================
+27. PRODUCTS API: api/products.php
+==================================================
+
+Ye API JSON me products return karti hai.
+
+Support:
+- `category_id`
+- `search`
+
+Use hota hai:
+- public homepage filter me
+- user dashboard category filter me
+
+Professional improvement:
+- ab search aur category dono consistently backend query me use hote hain
+
+==================================================
+28. CART API: api/cart.php
+==================================================
+
+Ye API AJAX cart add flow handle karti hai.
+
+Kaam:
+- POST allow karti hai
+- action validate karti hai
+- product id validate karti hai
+- product exist karta hai ya nahi check karti hai
+- session cart update karti hai
+- updated totals JSON me return karti hai
+
+Fayda:
+- product add karne par full page refresh nahi hota
+
+==================================================
+29. MAIN DATABASE TABLES
+==================================================
+
+1. `users`
+- login identity
+- profile data
+- role
+- delivery details
+
+2. `categories`
+- product grouping
+
+3. `products`
+- product catalog
+- price
+- description
+- category
+- image
+
+4. `orders`
+- ek order ki main entry
+- user link
+- total
+- status
+- shipping snapshot
+
+5. `order_items`
+- order ke andar kaunse products the
+- quantity
+- subtotal
+- product/category snapshot
+
+==================================================
+30. REQUEST FLOW EXAMPLES
+==================================================
+
+FLOW A: Login
+1. User login page open karta hai
+2. Email/password submit karta hai
+3. DB me email search hota hai
+4. Password verify hota hai
+5. Session set hota hai
+6. Role check hota hai
+7. User/admin dashboard redirect hota hai
+
+FLOW B: Add to Cart
+1. User product card me Add to Cart click karta hai
+2. AJAX request `api/cart.php` ko jati hai
+3. Product validate hota hai
+4. Session cart update hota hai
+5. Cart count update hota hai
+
+FLOW C: Place Order
+1. User cart page open karta hai
+2. Cart + profile load hota hai
+3. Address complete hona chahiye
+4. Place Order click hota hai
+5. Order + order items transaction me save hote hain
+6. Cart clear hota hai
+7. Success flash dikh jata hai
+
+FLOW D: Admin Add Product
+1. Admin form fill karta hai
+2. Validation hoti hai
+3. Image resolve hoti hai
+4. DB insert hota hai
+5. Flash message ke saath products list me redirect hota hai
+
+==================================================
+31. IMPORTANT PHP FUNCTIONS JO PROJECT ME USE HOTI HAIN
+==================================================
+
+Native / built-in:
+- `session_start()`
+- `session_regenerate_id()`
+- `header()`
+- `exit()`
+- `trim()`
+- `filter_var()`
+- `password_hash()`
+- `password_verify()`
+- `htmlspecialchars()`
+- `move_uploaded_file()`
+
+MySQLi:
+- `$conn->query()`
+- `$conn->prepare()`
+- `bind_param()`
+- `execute()`
+- `get_result()`
+- `fetch_assoc()`
+- `fetch_all()`
+- `begin_transaction()`
+- `commit()`
+- `rollback()`
+
+==================================================
+32. SECURITY AUR CODE QUALITY FEATURES
+==================================================
+
+Project me already ye achhi cheezein hain:
+- prepared statements
+- password hashing
+- safe output helper
+- role-based access
+- session regenerate on login
+- delivery profile validation before checkout
+- transaction based order create
+- delete guard for ordered products
+
+==================================================
+33. IS PROFESSIONAL PASS ME KYA IMPROVEMENTS KI GAYI
+==================================================
+
+Backend improvements:
+- admin auth role-based banaya
+- `role` field schema aur SQL dump me add kiya
+- order me shipping snapshot add kiya
+- checkout ko delivery profile se link kiya
+- admin aur user dono order views me delivery details dikhayi
+- products API ko search-compatible banaya
+
+UI / UX improvements:
+- login/register ko proper professional layout diya
+- fake social login clutter hataaya
+- auth JS validation clean ki
+- homepage CTA smarter banaya
+- account/profile flow ko better connect kiya
+- updated pages me English text standardize kiya
+
+==================================================
+34. FUTURE IMPROVEMENT AREAS
+==================================================
+
+1. `includes/store.php`
+- purani helper copy hai
+- future me remove ya archive karni chahiye
+
+2. Migrations
+- abhi schema helper se changes ho rahe hain
+- future me proper migration system better rahega
+
+3. Order status update
+- admin orders dekh raha hai
+- future me status update bhi add kar sakte ho
+
+4. Forgot password
+- abhi real reset flow nahi hai
+
+5. CSRF protection
+- future me form tokens add karna achha rahega
+
+6. Stock management
+- products ke liye inventory tracking future me add ho sakti hai
+
+==================================================
+35. FINAL TEACHER NOTE
+==================================================
+
+Agar aapko project deeply samajhna hai, to is order me padho:
+
+Step 1
+- `assets/db.php`
+- samjho DB connect kaise ho raha hai
+
+Step 2
+- `config/store.php`
+- samjho actual backend helper architecture kya hai
+
+Step 3
+- `auth/login.php` aur `auth/register.php`
+- samjho session aur auth flow kaise start hota hai
+
+Step 4
+- `dashboard/user_dashboard.php`
+- samjho user side helper data ko kaise use karti hai
+
+Step 5
+- `dashboard/cart.php`
+- samjho cart se order ka flow kaise ban raha hai
+
+Step 6
+- `dashboard/dashboard.php`
+- samjho admin side same helper ko kaise consume karti hai
+
+Step 7
+- `api/products.php` aur `api/cart.php`
+- samjho AJAX based flow kaise chal raha hai
+
+Sabse important baat:
+- page files me pura business logic nahi hai
+- real reusable backend logic `config/store.php` me hai
+- isliye agar aapko project ka asli backend samajhna hai,
+  to `config/store.php` ko achhe se samajhna sabse zaroori hai
+
+Ek line me:
+- `config/store.php` samajh gaye,
+- to pura project backend ka 70-80% clear ho jayega.

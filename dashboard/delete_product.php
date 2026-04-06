@@ -3,7 +3,12 @@ require_once __DIR__ . '/../config/store.php';
 
 require_admin();
 
-$productId = isset($_GET['id']) ? (int) $_GET['id'] : 0;
+if (!request_is_post() || !validate_csrf_token(post_csrf_token(), 'admin_delete_product_form')) {
+  set_flash('error', 'Invalid delete request.');
+  redirect_to('dashboard.php?section=products');
+}
+
+$productId = isset($_POST['id']) ? (int) $_POST['id'] : 0;
 $product = fetch_product_by_id($conn, $productId);
 
 if (!$product) {

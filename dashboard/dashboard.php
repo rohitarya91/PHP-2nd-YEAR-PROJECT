@@ -13,20 +13,33 @@ $avatarLetter = get_avatar_letter($name);
 $formData = [
   'name' => '',
   'price' => '',
+  'mrp' => '',
+  'unit_label' => '1 pack',
   'description' => '',
   'category_id' => '',
+  'stock_quantity' => '25',
+  'delivery_minutes' => '20',
+  'badge_text' => '',
+  'is_featured' => 0,
   'image_url' => '',
 ];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $section = 'add-product';
+  enforce_csrf_or_errors($errors, 'admin_add_product_form');
   $validated = validate_product_data($_POST);
-  $errors = $validated['errors'];
+  $errors = array_merge($errors, $validated['errors']);
   $formData = [
     'name' => $validated['name'],
     'price' => (string) $validated['price'],
+    'mrp' => (string) $validated['mrp'],
+    'unit_label' => $validated['unit_label'],
     'description' => $validated['description'],
     'category_id' => (string) $validated['category_id'],
+    'stock_quantity' => (string) $validated['stock_quantity'],
+    'delivery_minutes' => (string) $validated['delivery_minutes'],
+    'badge_text' => $validated['badge_text'],
+    'is_featured' => (int) $validated['is_featured'],
     'image_url' => $validated['image_url'],
   ];
 
@@ -35,7 +48,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!$imageResult['success']) {
       $errors[] = $imageResult['message'];
-    } elseif (create_product($conn, $validated['name'], $validated['price'], $validated['description'], $imageResult['filename'], $validated['category_id'])) {
+    } elseif (create_product($conn, $validated, $imageResult['filename'])) {
       set_flash('success', 'Product added successfully.');
       redirect_to('dashboard.php?section=products');
     } else {
@@ -51,10 +64,10 @@ $recentProducts = fetch_recent_products($conn);
 $orders = fetch_admin_orders($conn);
 
 $pageTitles = [
-  'dashboard' => ['Admin Dashboard', 'View store statistics and recent activity.'],
-  'products' => ['All Products', 'Manage your full product catalog from one place.'],
-  'orders' => ['All Orders', 'Track every placed order with real data.'],
-  'add-product' => ['Add Product', 'Add a new product using upload or image URL.'],
+  'dashboard' => ['Admin Dashboard', 'Track catalog health, inventory movement, and order operations.'],
+  'products' => ['All Products', 'Manage pricing, stock, delivery ETA, and merchandising from one place.'],
+  'orders' => ['All Orders', 'Track customer orders with billing and delivery snapshots.'],
+  'add-product' => ['Add Product', 'Create sellable quick-commerce SKUs with stock, MRP, and delivery info.'],
 ];
 
 $pageTitle = $pageTitles[$section][0] ?? $pageTitles['dashboard'][0];
@@ -186,6 +199,21 @@ $pageSubtitle = $pageTitles[$section][1] ?? $pageTitles['dashboard'][1];
               <h3>Total Sales</h3>
               <strong>Rs <?php echo e((string) $counts['sales']); ?></strong>
             </div>
+
+            <div class="stat-card">
+              <h3>Featured SKUs</h3>
+              <strong><?php echo e((string) $counts['featured_products']); ?></strong>
+            </div>
+
+            <div class="stat-card">
+              <h3>Low Stock</h3>
+              <strong><?php echo e((string) $counts['low_stock']); ?></strong>
+            </div>
+
+            <div class="stat-card">
+              <h3>Out of Stock</h3>
+              <strong><?php echo e((string) $counts['out_of_stock']); ?></strong>
+            </div>
           </div>
         </div>
 
@@ -234,10 +262,15 @@ $pageSubtitle = $pageTitles[$section][1] ?? $pageTitles['dashboard'][1];
                 </div>
 
                 <div class="product-body">
+                  <?php $badgeLabel = product_badge_label($row); ?>
+                  <?php if ($badgeLabel !== ''): ?>
+                    <p class="muted"><?php echo e($badgeLabel); ?></p>
+                  <?php endif; ?>
                   <h3><?php echo e($row['name']); ?></h3>
-                  <p class="muted"><?php echo e($row['category_name'] ?? 'Uncategorized'); ?></p>
-                  <p class="price">Rs <?php echo e((string) $row['price']); ?></p>
+                  <p class="muted"><?php echo e($row['category_name'] ?? 'Uncategorized'); ?> | <?php echo e(product_unit_label($row)); ?></p>
+                  <p class="price">Rs <?php echo e((string) $row['price']); ?><?php if (product_savings_amount($row) > 0): ?> <span class="muted">MRP Rs <?php echo e((string) product_mrp_value($row)); ?></span><?php endif; ?></p>
                   <p class="product-desc"><?php echo e(product_short_description($row['description'], 110)); ?></p>
+                  <p class="muted"><?php echo e(product_stock_status($row)); ?> | ETA <?php echo e(product_delivery_window($row)); ?></p>
                   <p class="muted">Added on <?php echo e(date('d M Y', strtotime($row['created_at']))); ?></p>
                 </div>
 
@@ -245,9 +278,11 @@ $pageSubtitle = $pageTitles[$section][1] ?? $pageTitles['dashboard'][1];
                   <div class="admin-actions full-actions">
                     <a href="edit_product.php?id=<?php echo e((string) $row['id']); ?>" class="action-btn edit-btn"><i
                         class="fa-solid fa-pen"></i> Edit</a>
-                    <a href="delete_product.php?id=<?php echo e((string) $row['id']); ?>"
-                      class="action-btn delete-btn-link" onclick="return confirm('Delete this product?');"><i
-                        class="fa-solid fa-trash"></i> Delete</a>
+                    <form method="POST" action="delete_product.php" onsubmit="return confirm('Delete this product?');">
+                      <?php echo csrf_field('admin_delete_product_form'); ?>
+                      <input type="hidden" name="id" value="<?php echo e((string) $row['id']); ?>">
+                      <button type="submit" class="action-btn delete-btn-link"><i class="fa-solid fa-trash"></i> Delete</button>
+                    </form>
                   </div>
                 </div>
               </div>
@@ -269,8 +304,30 @@ $pageSubtitle = $pageTitles[$section][1] ?? $pageTitles['dashboard'][1];
                   <?php echo e($order['email']); ?> | Rs <?php echo e((string) $order['total_amount']); ?> |
                   <?php echo e($order['status']); ?>
                 </p>
+                <p class="muted">
+                  Subtotal: Rs <?php echo e((string) $order['subtotal_amount']); ?> |
+                  Savings: Rs <?php echo e((string) $order['discount_amount']); ?> |
+                  Delivery: Rs <?php echo e((string) $order['delivery_fee']); ?> |
+                  Handling: Rs <?php echo e((string) $order['handling_fee']); ?>
+                </p>
+                <p class="muted">
+                  Payment: <?php echo e($order['payment_method'] ?? STORE_DEFAULT_PAYMENT_METHOD); ?> |
+                  Payment Status: <?php echo e($order['payment_status'] ?? 'Pending'); ?> |
+                  ETA: <?php echo e($order['delivery_eta_label'] ?? 'Pending'); ?>
+                  <?php if (!empty($order['payment_reference'])): ?> | Ref: <?php echo e($order['payment_reference']); ?><?php endif; ?>
+                </p>
                 <?php if (!empty($order['items_summary'])): ?>
                   <p class="muted"><?php echo e($order['items_summary']); ?></p>
+                <?php endif; ?>
+                <?php if (!empty($order['shipping_name']) || !empty($order['shipping_phone']) || !empty($order['shipping_address'])): ?>
+                  <p class="muted">
+                    Delivery contact:
+                    <?php echo e(trim(implode(' | ', array_filter([
+                      $order['shipping_name'] ?? '',
+                      $order['shipping_phone'] ?? '',
+                    ])))); ?>
+                  </p>
+                  <p class="muted"><?php echo e($order['shipping_address'] ?? ''); ?></p>
                 <?php endif; ?>
               </div>
             <?php endforeach; ?>
@@ -281,13 +338,18 @@ $pageSubtitle = $pageTitles[$section][1] ?? $pageTitles['dashboard'][1];
       <section id="add-product-section" class="section-page <?php echo $section === 'add-product' ? 'active' : ''; ?>">
         <div class="content-card section-card">
           <h2>Add Product</h2>
-          <p class="muted section-subtext">Upload an image file or paste an image URL. If both are provided, the
-            uploaded file is used first.</p>
+          <p class="muted section-subtext">Create production-ready catalog items with pricing, stock, unit size, ETA,
+            and merchandising labels. If both image options are filled, the uploaded file is used first.</p>
           <form method="POST" enctype="multipart/form-data">
+            <?php echo csrf_field('admin_add_product_form'); ?>
             <input type="text" name="name" placeholder="Product Name" required class="input-field"
               value="<?php echo e($formData['name']); ?>">
             <input type="number" name="price" placeholder="Price" required class="input-field"
               value="<?php echo e($formData['price']); ?>">
+            <input type="number" name="mrp" placeholder="MRP" required class="input-field"
+              value="<?php echo e($formData['mrp']); ?>">
+            <input type="text" name="unit_label" placeholder="Unit / Pack Size (e.g. 500 g, 1 L)" required class="input-field"
+              value="<?php echo e($formData['unit_label']); ?>">
             <select name="category_id" required class="input-field ">
               <option value="" style="color: #555;">Select Category</option>
               <?php foreach ($categories as $category): ?>
@@ -296,6 +358,16 @@ $pageSubtitle = $pageTitles[$section][1] ?? $pageTitles['dashboard'][1];
                 </option>
               <?php endforeach; ?>
             </select>
+            <input type="number" name="stock_quantity" placeholder="Available Stock" required class="input-field"
+              value="<?php echo e($formData['stock_quantity']); ?>">
+            <input type="number" name="delivery_minutes" placeholder="Delivery ETA in Minutes" required class="input-field"
+              value="<?php echo e($formData['delivery_minutes']); ?>">
+            <input type="text" name="badge_text" placeholder="Badge Text (e.g. Best Seller)" class="input-field"
+              value="<?php echo e($formData['badge_text']); ?>">
+            <label class="muted" style="display:flex; align-items:center; gap:10px;">
+              <input type="checkbox" name="is_featured" value="1" <?php echo (int) $formData['is_featured'] === 1 ? 'checked' : ''; ?>>
+              Mark as featured product
+            </label>
             <textarea name="description" placeholder="Product Description" required
               class="input-field text-area-field"><?php echo e($formData['description']); ?></textarea>
             <div class="file-input-wrapper">

@@ -3,14 +3,25 @@ require_once __DIR__ . '/config/store.php';
 
 $categories = fetch_all_categories($conn);
 $initialProducts = fetch_all_products($conn);
+$isLoggedIn = current_user_id() > 0;
+$dashboardHref = is_admin() ? './dashboard/dashboard.php' : './dashboard/user_dashboard.php';
+$primaryActionHref = $isLoggedIn ? $dashboardHref : './auth/login.php';
+$primaryActionLabel = $isLoggedIn ? 'Open Dashboard' : 'Login';
+$heroActionLabel = $isLoggedIn ? 'Go to Dashboard' : 'Shop Fresh';
 
 function render_public_product_card(array $product): void
 {
     $name = e($product['name'] ?? '');
     $price = e((string) ($product['price'] ?? 0));
+    $mrp = e((string) product_mrp_value($product));
+    $unitLabel = e(product_unit_label($product));
     $description = e(product_short_description($product['description'] ?? '', 120));
     $categoryName = e($product['category_name'] ?? 'Uncategorized');
     $image = e(product_image_src($product['image'] ?? null, 'uploads/'));
+    $badgeLabel = e(product_badge_label($product));
+    $stockStatus = e(product_stock_status($product));
+    $deliveryLabel = e(product_delivery_window($product));
+    $badgeMarkup = $badgeLabel !== '' ? "<span class=\"category-tag\">{$badgeLabel}</span>" : '';
 
     echo <<<HTML
       <article class="card product-card-live">
@@ -18,9 +29,12 @@ function render_public_product_card(array $product): void
           <img src="{$image}" alt="{$name}">
         </div>
         <div class="product-content">
+          {$badgeMarkup}
           <span class="category-tag">{$categoryName}</span>
           <h3>{$name}</h3>
-          <p class="product-price">Rs {$price}</p>
+          <p class="product-price">Rs {$price} <span style="font-size: 13px; color: rgba(255,255,255,0.7);">MRP Rs {$mrp}</span></p>
+          <p style="color: rgba(255,255,255,0.72); margin-bottom: 8px;">{$unitLabel} | {$stockStatus}</p>
+          <p style="color: rgba(255,255,255,0.72); margin-bottom: 10px;">Fast delivery in {$deliveryLabel}</p>
           <p>{$description}</p>
         </div>
       </article>
@@ -435,7 +449,7 @@ function render_public_product_card(array $product): void
       <li><a href="#about">About</a></li>
       <li><a href="#services">Shop</a></li>
       <li><a href="#contact">Contact</a></li>
-      <li><a href="./auth/login.php" class="nav-btn">Login</a></li>
+      <li><a href="<?php echo e($primaryActionHref); ?>" class="nav-btn"><?php echo e($primaryActionLabel); ?></a></li>
     </ul>
   </nav>
 
@@ -443,9 +457,9 @@ function render_public_product_card(array $product): void
     <div class="hero-content">
       <h1 id="mainText">Fresh From Farm to Your Table</h1>
       <p>
-        Organic fruits, vegetables, and farm-fresh products delivered with care.
+        Real inventory, real grocery imagery, and quick-commerce essentials delivered with a fast local promise.
       </p>
-      <a href="./auth/login.php" class="btn">Shop Fresh</a>
+      <a href="<?php echo e($primaryActionHref); ?>" class="btn"><?php echo e($heroActionLabel); ?></a>
     </div>
   </section>
 
@@ -457,10 +471,9 @@ function render_public_product_card(array $product): void
           src="https://imgs.search.brave.com/jNhXjk55Vd-TRGcd_4LeotpvSoQLE3MVA9gEsDJfpcU/rs:fit:860:0:0:0/g:ce/aHR0cHM6Ly90My5m/dGNkbi5uZXQvanBn/LzAwLzg2LzEzLzc2/LzM2MF9GXzg2MTM3NjQ3X29vVVJFSW85YTluRDNaQVhjdXpraThoUExoSHZOT2MxLmpwZw"
           alt="Fresh farm produce including various fruits and vegetables" />
         <p>
-          Harvest Fresh is committed to delivering organic fruits, vegetables,
-          and farm products directly from local farmers to your home. We
-          believe in healthy living, sustainable farming, and fresh food you
-          can trust.
+          Harvest Fresh is now shaped like a practical quick-commerce store:
+          curated categories, real product photos, stock-aware catalog cards,
+          and a delivery-focused shopping flow built for everyday grocery use.
         </p>
       </div>
     </div>
@@ -470,8 +483,8 @@ function render_public_product_card(array $product): void
     <div class="container">
       <h2>Shop by Category</h2>
       <p class="section-copy">
-        Click any category to load matching products instantly. The filter uses
-        `category_id` on the backend and updates the list without refreshing the page.
+        Click any category to browse stocked items with pack sizes, delivery ETA,
+        and pricing details. The list updates instantly without refreshing the page.
       </p>
 
       <div class="category-toolbar" id="category-list">
@@ -507,10 +520,10 @@ function render_public_product_card(array $product): void
     <div class="container">
       <h2>Get In Touch</h2>
       <form id="contactForm" onsubmit="handleSubmit(event)">
-        <input type="text" placeholder="Your Name" required />
-        <input type="email" placeholder="Your Email" required />
-        <textarea placeholder="Your Message" required></textarea>
-        <button type="submit">Send Message</button>
+        <input type="text" placeholder="Store Manager Name" required />
+        <input type="email" placeholder="Business Email" required />
+        <textarea placeholder="Tell us your delivery area, product needs, or onboarding query" required></textarea>
+        <button type="submit">Request Callback</button>
       </form>
     </div>
   </section>
@@ -593,23 +606,37 @@ function render_public_product_card(array $product): void
         return;
       }
 
-      productList.innerHTML = products.map(product => `
+      productList.innerHTML = products.map(product => {
+        const mrp = Number(product.mrp || product.price || 0);
+        const price = Number(product.price || 0);
+        const unitLabel = product.unit_label || '1 pack';
+        const stockQuantity = Number(product.stock_quantity || 0);
+        const stockStatus = stockQuantity <= 0 ? 'Out of stock' : (stockQuantity <= 8 ? `Only ${stockQuantity} left` : 'In stock');
+        const deliveryMinutes = Math.max(10, Number(product.delivery_minutes || 20));
+        const badgeLabel = String(product.badge_text || '').trim() || (Number(product.is_featured || 0) === 1 ? 'Featured' : '');
+        const badgeMarkup = badgeLabel ? `<span class="category-tag">${escapeHtml(badgeLabel)}</span>` : '';
+
+        return `
         <article class="card product-card-live">
           <div class="product-image">
             <img src="${escapeHtml(normalizeImagePath(product.image))}" alt="${escapeHtml(product.name)}">
           </div>
           <div class="product-content">
+            ${badgeMarkup}
             <span class="category-tag">${escapeHtml(product.category_name || 'Uncategorized')}</span>
             <h3>${escapeHtml(product.name)}</h3>
-            <p class="product-price">Rs ${escapeHtml(product.price)}</p>
+            <p class="product-price">Rs ${escapeHtml(price)} <span style="font-size: 13px; color: rgba(255,255,255,0.7);">MRP Rs ${escapeHtml(mrp)}</span></p>
+            <p style="color: rgba(255,255,255,0.72); margin-bottom: 8px;">${escapeHtml(unitLabel)} | ${escapeHtml(stockStatus)}</p>
+            <p style="color: rgba(255,255,255,0.72); margin-bottom: 10px;">Fast delivery in ${escapeHtml(`${deliveryMinutes}-${deliveryMinutes + 10} mins`)}</p>
             <p>${escapeHtml(truncateText(product.description, 120))}</p>
           </div>
         </article>
-      `).join('');
+      `;
+      }).join('');
     }
 
     async function loadProducts(categoryId, categoryName) {
-      const endpoint = categoryId ? `api/products.php?category_id=${encodeURIComponent(categoryId)}` : 'api/products.php';
+      const endpoint = categoryId ? `catalog_api.php?category_id=${encodeURIComponent(categoryId)}` : 'catalog_api.php';
       selectedCategoryLabel.textContent = categoryId
         ? `Showing ${categoryName} products`
         : 'Showing all products';

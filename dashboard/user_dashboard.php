@@ -13,8 +13,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $redirectSection = $_POST['redirect_section'] ?? 'shop';
 
   if ($action === 'add_to_cart' && $productId > 0) {
-    add_to_cart($productId, 1);
-    set_flash('success', 'Product added to cart.');
+    if (!validate_csrf_token(post_csrf_token(), 'cart_api_form')) {
+      set_flash('error', 'Session token expired. Please refresh and try again.');
+    } else {
+      $result = add_product_to_cart($conn, $productId, 1);
+      set_flash($result['success'] ? 'success' : 'error', $result['message']);
+    }
     redirect_to('user_dashboard.php?section=' . urlencode($redirectSection));
   }
 }
@@ -27,6 +31,14 @@ $products = fetch_all_products($conn, $search);
 $homeProducts = fetch_all_products($conn);
 $orders = fetch_user_orders($conn, (int) $_SESSION['user_id']);
 $cart = get_cart_totals($conn);
+$profile = fetch_user_profile($conn, current_user_id()) ?? [];
+$profileAddress = trim(implode(', ', array_filter([
+  $profile['address_line1'] ?? '',
+  $profile['address_line2'] ?? '',
+  $profile['city'] ?? '',
+  $profile['state'] ?? '',
+  $profile['postal_code'] ?? '',
+])));
 $categoryIcons = [
   'Vegetables' => 'fa-carrot',
   'Fruits' => 'fa-apple-whole',
@@ -38,11 +50,23 @@ $categoryIcons = [
 function render_home_product_card(array $product): void
 {
   $productId = e((string) $product['id']);
+  $csrf = e(csrf_token('cart_api_form'));
   $name = e($product['name']);
   $image = e(product_image_src($product['image']));
   $price = e((string) $product['price']);
+  $mrp = e((string) product_mrp_value($product));
+  $unitLabel = e(product_unit_label($product));
   $description = e(product_short_description($product['description'], 90));
   $categoryName = e($product['category_name'] ?? 'Uncategorized');
+  $badgeLabel = e(product_badge_label($product));
+  $stockStatus = e(product_stock_status($product));
+  $deliveryLabel = e(product_delivery_window($product));
+  $isInStock = product_is_in_stock($product);
+  $savings = product_savings_amount($product);
+  $buttonLabel = $isInStock ? 'Add to Cart' : 'Out of Stock';
+  $buttonState = $isInStock ? '' : 'disabled';
+  $badgeMarkup = $badgeLabel !== '' ? '<p class="muted">' . $badgeLabel . '</p>' : '';
+  $savingsMarkup = $savings > 0 ? '<p class="muted">Save Rs ' . e((string) $savings) . '</p>' : '';
 
   echo <<<HTML
     <div class="product-card home-product-card shop-product-card wide-product-card">
@@ -50,16 +74,68 @@ function render_home_product_card(array $product): void
         <img src="{$image}" alt="{$name}">
       </div>
       <div class="home-product-body">
+        {$badgeMarkup}
         <p class="product-category-label">{$categoryName}</p>
         <h4>{$name}</h4>
-        <p class="price">Rs {$price}</p>
+        <p class="price">Rs {$price} <span class="muted">MRP Rs {$mrp}</span></p>
+        <p class="muted">{$unitLabel} | {$stockStatus}</p>
+        <p class="muted">Fast delivery in {$deliveryLabel}</p>
         <p class="product-desc">{$description}</p>
+        {$savingsMarkup}
       </div>
       <form method="POST" class="home-cart-form">
+        <input type="hidden" name="_csrf" value="{$csrf}">
         <input type="hidden" name="action" value="add_to_cart">
         <input type="hidden" name="product_id" value="{$productId}">
         <input type="hidden" name="redirect_section" value="home">
-        <button type="submit" class="btn-primary full-btn">Add to Cart</button>
+        <button type="submit" class="btn-primary full-btn" {$buttonState}>{$buttonLabel}</button>
+      </form>
+    </div>
+  HTML;
+}
+
+function render_shop_product_card(array $product): void
+{
+  $productId = e((string) $product['id']);
+  $csrf = e(csrf_token('cart_api_form'));
+  $name = e($product['name']);
+  $image = e(product_image_src($product['image']));
+  $price = e((string) $product['price']);
+  $mrp = e((string) product_mrp_value($product));
+  $unitLabel = e(product_unit_label($product));
+  $description = e(product_short_description($product['description'], 100));
+  $categoryName = e($product['category_name'] ?? 'Uncategorized');
+  $badgeLabel = e(product_badge_label($product));
+  $stockStatus = e(product_stock_status($product));
+  $deliveryLabel = e(product_delivery_window($product));
+  $isInStock = product_is_in_stock($product);
+  $savings = product_savings_amount($product);
+  $buttonLabel = $isInStock ? 'Add to Cart' : 'Out of Stock';
+  $buttonState = $isInStock ? '' : 'disabled';
+  $badgeMarkup = $badgeLabel !== '' ? '<p class="muted">' . $badgeLabel . '</p>' : '';
+  $savingsMarkup = $savings > 0 ? '<p class="muted">Save Rs ' . e((string) $savings) . '</p>' : '';
+
+  echo <<<HTML
+    <div class="product-card shop-product-card wide-product-card">
+      <div class="shop-product-image">
+        <img src="{$image}" alt="{$name}">
+      </div>
+      <div class="shop-product-body">
+        {$badgeMarkup}
+        <p class="product-category-label">{$categoryName}</p>
+        <h4>{$name}</h4>
+        <p class="price">Rs {$price} <span class="muted">MRP Rs {$mrp}</span></p>
+        <p class="muted">{$unitLabel} | {$stockStatus}</p>
+        <p class="muted">Fast delivery in {$deliveryLabel}</p>
+        <p class="product-desc">{$description}</p>
+        {$savingsMarkup}
+      </div>
+      <form method="POST" class="shop-cart-form">
+        <input type="hidden" name="_csrf" value="{$csrf}">
+        <input type="hidden" name="action" value="add_to_cart">
+        <input type="hidden" name="product_id" value="{$productId}">
+        <input type="hidden" name="redirect_section" value="shop">
+        <button type="submit" class="btn-primary full-btn" {$buttonState}>{$buttonLabel}</button>
       </form>
     </div>
   HTML;
@@ -194,6 +270,104 @@ function render_home_product_card(array $product): void
       color: rgba(255,255,255,0.72);
     }
 
+    .shop-summary-card {
+      margin-bottom: 20px;
+    }
+
+    .summary-pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 10px 14px;
+      border-radius: 999px;
+      background: rgba(34,197,94,0.18);
+      color: #d7ffe5;
+      border: 1px solid rgba(34,197,94,0.24);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .profile-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.9fr);
+      gap: 20px;
+      align-items: start;
+    }
+
+    .profile-card-block {
+      height: 100%;
+    }
+
+    .profile-summary {
+      display: grid;
+      gap: 6px;
+    }
+
+    .profile-summary .address-row {
+      align-items: flex-start;
+    }
+
+    .profile-summary .address-row strong {
+      max-width: 360px;
+      text-align: right;
+      line-height: 1.5;
+    }
+
+    .profile-actions {
+      display: grid;
+      gap: 14px;
+    }
+
+    .profile-action-card {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+      padding: 18px;
+      border-radius: 18px;
+      text-decoration: none;
+      color: inherit;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+    }
+
+    .profile-action-card:hover {
+      transform: translateY(-2px);
+      border-color: rgba(34,197,94,0.35);
+      box-shadow: 0 16px 28px rgba(15,23,42,0.22);
+    }
+
+    .profile-action-icon {
+      width: 42px;
+      height: 42px;
+      border-radius: 14px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(34,197,94,0.18);
+      color: #d7ffe5;
+      flex-shrink: 0;
+    }
+
+    .profile-action-copy h3 {
+      margin: 0 0 6px;
+      font-size: 16px;
+    }
+
+    .profile-action-copy p {
+      margin: 0;
+      color: rgba(255,255,255,0.72);
+      line-height: 1.5;
+      font-size: 14px;
+    }
+
+    .profile-note {
+      margin: 16px 0 0;
+      color: rgba(255,255,255,0.7);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
     @media (max-width: 768px) {
       #navbar {
         margin: 12px 12px 0;
@@ -241,6 +415,22 @@ function render_home_product_card(array $product): void
 
       .cart-link .cart-link-text {
         display: none;
+      }
+
+      .profile-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .profile-summary .data-row,
+      .profile-summary .address-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+      }
+
+      .profile-summary .address-row strong {
+        max-width: none;
+        text-align: left;
       }
     }
   </style>
@@ -303,7 +493,7 @@ function render_home_product_card(array $product): void
       <div class="panel-header">
         <div class="panel-title">
           <h1>Welcome, <?php echo e(current_user_name()); ?></h1>
-          <p class="muted">Explore fresh products and track your orders.</p>
+          <p class="muted">Order essentials with real stock visibility, quick delivery windows, and live cart pricing.</p>
         </div>
       </div>
 
@@ -317,9 +507,9 @@ function render_home_product_card(array $product): void
         <div class="home-hero">
           <div class="home-hero-overlay"></div>
           <div class="home-hero-content">
-            <span class="hero-badge">Fresh Grocery Delivery</span>
-            <h2>Fresh &amp; Organic Products</h2>
-            <p>Farm-fresh fruits, vegetables, dairy, and daily essentials delivered in 25-40 minutes with the same trusted quality.</p>
+            <span class="hero-badge">Quick Commerce Ready</span>
+            <h2>Essentials Delivered in <?php echo e($cart['estimated_delivery']); ?></h2>
+            <p>Browse stocked vegetables, fruits, dairy, bakery, and daily needs with pack sizes, savings, and delivery windows shown before checkout.</p>
             <div class="hero-actions">
               <button type="button" class="btn-primary" onclick="openSection('shop')">Shop Now</button>
               <a href="cart.php" class="btn-ghost">View Cart</a>
@@ -331,7 +521,7 @@ function render_home_product_card(array $product): void
           <div class="section-head">
             <div>
               <h2>Shop by Category</h2>
-              <p class="muted">Category par click karo aur usi category ke saare products dekho.</p>
+              <p class="muted">Click a category to explore products from that section.</p>
             </div>
           </div>
 
@@ -357,7 +547,7 @@ function render_home_product_card(array $product): void
           <div class="category-result-info">
             <div>
               <h2 id="home-category-title">All Products</h2>
-              <p class="muted" id="home-category-copy">Selected category ke products yahan dikhte hain.</p>
+              <p class="muted" id="home-category-copy">Products from the selected category appear here.</p>
             </div>
             <button type="button" class="btn-ghost" onclick="openSection('shop')">Browse All</button>
           </div>
@@ -379,51 +569,63 @@ function render_home_product_card(array $product): void
       </section>
 
       <section id="shop-section" class="section-page <?php echo $section === 'shop' ? 'active' : ''; ?>">
-        <div class="stats-grid">
-          <div class="stat-card">
-            <h3>My Orders</h3>
-            <strong><?php echo e((string) count($orders)); ?></strong>
+        <div class="content-card shop-summary-card">
+          <div class="category-result-info">
+            <div>
+              <h2>Quick Cart Summary</h2>
+              <p class="muted">Track your live cart value, savings, and next delivery estimate.</p>
+            </div>
+            <div class="summary-pill"><?php echo e((string) $cart['total_items']); ?> Items | Rs <?php echo e((string) $cart['total_amount']); ?></div>
+          </div>
+        </div>
+
+        <div class="content-card home-section-card">
+          <div class="section-head">
+            <div>
+              <h2>Shop by Category</h2>
+              <p class="muted">Select a category to browse filtered products.</p>
+            </div>
+            <button type="button" class="btn-ghost" onclick="openSection('orders')">My Orders</button>
           </div>
 
-          <div class="stat-card">
-            <h3>Products</h3>
-            <strong><?php echo e((string) count($products)); ?></strong>
-          </div>
-
-          <div class="stat-card">
-            <h3>Cart Items</h3>
-            <strong id="shop-cart-count"><?php echo e((string) $cart['total_items']); ?></strong>
+          <div class="category-strip">
+            <button type="button" class="category-chip shop-category-chip is-active" data-category-id="" data-category-name="All Products">
+              <span><i class="fa-solid fa-store"></i></span>
+              <h4>All Products</h4>
+            </button>
+            <?php foreach ($categories as $category): ?>
+              <button
+                type="button"
+                class="category-chip shop-category-chip"
+                data-category-id="<?php echo e((string) $category['id']); ?>"
+                data-category-name="<?php echo e($category['name']); ?>">
+                <span><i class="fa-solid <?php echo e($categoryIcons[$category['name']] ?? 'fa-bag-shopping'); ?>"></i></span>
+                <h4><?php echo e($category['name']); ?></h4>
+              </button>
+            <?php endforeach; ?>
           </div>
         </div>
 
         <div class="content-card">
-          <h2>Shop Fresh Products</h2>
+          <div class="category-result-info">
+            <div>
+              <h2 id="shop-category-title">All Products</h2>
+              <p class="muted" id="shop-category-copy">Products from the selected shop category appear here.</p>
+            </div>
+            <button type="button" class="btn-ghost" onclick="openSection('orders')">View Orders</button>
+          </div>
+          <p class="category-result-status" id="shop-category-status"><?php echo $search !== '' ? e('Showing ' . count($products) . ' results for "' . $search . '".') : 'Showing all products'; ?></p>
 
-          <div class="product-grid shop-grid-wide">
+          <div class="product-grid shop-grid-wide" id="shop-category-products">
             <?php if (empty($products)): ?>
-              <div class="product-card">
+              <div class="category-empty">
                 <h4>No products found</h4>
                 <p>Try another search term.</p>
               </div>
             <?php endif; ?>
 
             <?php foreach ($products as $product): ?>
-              <div class="product-card shop-product-card wide-product-card">
-                <div class="shop-product-image">
-                  <img src="<?php echo e(product_image_src($product['image'])); ?>" alt="<?php echo e($product['name']); ?>">
-                </div>
-                <div class="shop-product-body">
-                  <h4><?php echo e($product['name']); ?></h4>
-                  <p class="price">Rs <?php echo e((string) $product['price']); ?></p>
-                  <p class="product-desc"><?php echo e(product_short_description($product['description'], 100)); ?></p>
-                </div>
-                <form method="POST" class="shop-cart-form">
-                  <input type="hidden" name="action" value="add_to_cart">
-                  <input type="hidden" name="product_id" value="<?php echo e((string) $product['id']); ?>">
-                  <input type="hidden" name="redirect_section" value="shop">
-                  <button type="submit" class="btn-primary full-btn">Add to Cart</button>
-                </form>
-              </div>
+              <?php render_shop_product_card($product); ?>
             <?php endforeach; ?>
           </div>
         </div>
@@ -439,8 +641,29 @@ function render_home_product_card(array $product): void
             <?php foreach ($orders as $order): ?>
               <div class="order-item">
                 <p>Order #<?php echo e((string) $order['id']); ?> - <?php echo e($order['status']); ?> - Rs <?php echo e((string) $order['total_amount']); ?></p>
+                <p class="muted">
+                  Subtotal Rs <?php echo e((string) $order['subtotal_amount']); ?> |
+                  Savings Rs <?php echo e((string) $order['discount_amount']); ?> |
+                  Delivery Rs <?php echo e((string) $order['delivery_fee']); ?> |
+                  ETA <?php echo e($order['delivery_eta_label'] ?? 'Pending'); ?>
+                </p>
+                <p class="muted">
+                  Payment: <?php echo e($order['payment_method'] ?? STORE_DEFAULT_PAYMENT_METHOD); ?> |
+                  Status: <?php echo e($order['payment_status'] ?? 'Pending'); ?>
+                  <?php if (!empty($order['payment_reference'])): ?> | Ref: <?php echo e($order['payment_reference']); ?><?php endif; ?>
+                </p>
                 <?php if (!empty($order['items_summary'])): ?>
                   <p class="muted"><?php echo e($order['items_summary']); ?></p>
+                <?php endif; ?>
+                <?php if (!empty($order['shipping_name']) || !empty($order['shipping_phone']) || !empty($order['shipping_address'])): ?>
+                  <p class="muted">
+                    Deliver to:
+                    <?php echo e(trim(implode(' | ', array_filter([
+                      $order['shipping_name'] ?? '',
+                      $order['shipping_phone'] ?? '',
+                    ])))); ?>
+                  </p>
+                  <p class="muted"><?php echo e($order['shipping_address'] ?? ''); ?></p>
                 <?php endif; ?>
               </div>
             <?php endforeach; ?>
@@ -449,17 +672,63 @@ function render_home_product_card(array $product): void
       </section>
 
       <section id="profile-section" class="section-page <?php echo $section === 'profile' ? 'active' : ''; ?>">
-        <div class="content-card">
-          <h2>My Profile</h2>
+        <div class="profile-grid">
+          <div class="content-card profile-card-block">
+            <div class="section-head">
+              <div>
+                <h2>My Account</h2>
+                <p class="muted">Review your basic profile and saved delivery details here.</p>
+              </div>
+            </div>
 
-          <div class="data-row">
-            <span>Name</span>
-            <strong><?php echo e(current_user_name()); ?></strong>
+            <div class="profile-summary">
+              <div class="data-row">
+                <span>Full Name</span>
+                <strong><?php echo e($profile['name'] ?? current_user_name()); ?></strong>
+              </div>
+
+              <div class="data-row">
+                <span>Email ID</span>
+                <strong><?php echo e($profile['email'] ?? current_user_email()); ?></strong>
+              </div>
+
+              <div class="data-row">
+                <span>Phone Number</span>
+                <strong><?php echo e($profile['phone_number'] ?? 'Not added yet'); ?></strong>
+              </div>
+
+              <div class="data-row address-row">
+                <span>Delivery Address</span>
+                <strong><?php echo e($profileAddress !== '' ? $profileAddress : 'No delivery address saved yet.'); ?></strong>
+              </div>
+            </div>
           </div>
 
-          <div class="data-row">
-            <span>Email</span>
-            <strong><?php echo e(current_user_email()); ?></strong>
+          <div class="content-card profile-card-block">
+            <div class="section-copy">
+              <h2>Quick Actions</h2>
+              <p class="muted">Use these shortcuts to edit your profile or update your address.</p>
+            </div>
+
+            <div class="profile-actions">
+              <a class="profile-action-card" href="../account/account.php#profile-form">
+                <span class="profile-action-icon"><i class="fa-solid fa-user-pen"></i></span>
+                <span class="profile-action-copy">
+                  <h3>Edit Profile</h3>
+                  <p>Update basic details such as your name and phone number.</p>
+                </span>
+              </a>
+
+              <a class="profile-action-card" href="../account/account.php#address-form">
+                <span class="profile-action-icon"><i class="fa-solid fa-location-dot"></i></span>
+                <span class="profile-action-copy">
+                  <h3>Add Address</h3>
+                  <p>Add a full delivery address or update the one you already saved.</p>
+                </span>
+              </a>
+            </div>
+
+            <p class="profile-note">These details will be used for future orders and deliveries.</p>
           </div>
         </div>
       </section>
@@ -469,17 +738,22 @@ function render_home_product_card(array $product): void
 
 </html>
 <script>
-  const cartApiEndpoint = '../api/cart.php';
+  const cartApiEndpoint = '../cart_api.php';
+  const currentShopSearch = <?php echo json_encode($search); ?>;
   const userSidebar = document.getElementById('user-side-panel');
   const userMenuToggle = document.querySelector('.menu-toggle');
   const userMenuOverlay = document.querySelector('.menu-overlay');
   const cartCountLabels = document.querySelectorAll('.cart-count');
-  const shopCartCount = document.getElementById('shop-cart-count');
-  const homeCategoryButtons = document.querySelectorAll('.category-chip');
+  const homeCategoryButtons = document.querySelectorAll('.category-chip:not(.shop-category-chip)');
+  const shopCategoryButtons = document.querySelectorAll('.shop-category-chip');
   const homeCategoryProducts = document.getElementById('home-category-products');
+  const shopCategoryProducts = document.getElementById('shop-category-products');
   const homeCategoryTitle = document.getElementById('home-category-title');
   const homeCategoryCopy = document.getElementById('home-category-copy');
   const homeCategoryStatus = document.getElementById('home-category-status');
+  const shopCategoryTitle = document.getElementById('shop-category-title');
+  const shopCategoryCopy = document.getElementById('shop-category-copy');
+  const shopCategoryStatus = document.getElementById('shop-category-status');
   let dashboardToastTimeout;
 
   function activateSection(section) {
@@ -541,10 +815,6 @@ function render_home_product_card(array $product): void
     cartCountLabels.forEach(label => {
       label.textContent = `(${totalItems})`;
     });
-
-    if (shopCartCount) {
-      shopCartCount.textContent = String(totalItems);
-    }
   }
 
   function getDashboardToast() {
@@ -593,44 +863,123 @@ function render_home_product_card(array $product): void
     return text.length <= limit ? text : text.slice(0, limit - 3) + '...';
   }
 
-  function renderHomeProducts(products) {
-    if (!Array.isArray(products) || products.length === 0) {
-      homeCategoryProducts.innerHTML = `
-        <div class="category-empty">
-          <h4>No products found</h4>
-          <p>Is category me abhi koi product available nahi hai.</p>
-        </div>
-      `;
-      return;
+  function buildProductsEndpoint(categoryId, searchTerm = '') {
+    const params = new URLSearchParams();
+
+    if (categoryId) {
+      params.set('category_id', categoryId);
     }
 
-    homeCategoryProducts.innerHTML = products.map(product => `
+    if (searchTerm) {
+      params.set('search', searchTerm);
+    }
+
+    const query = params.toString();
+    return query ? `../catalog_api.php?${query}` : '../catalog_api.php';
+  }
+
+  function buildProductCardMarkup(product, sectionName) {
+    const csrfToken = <?php echo json_encode(csrf_token('cart_api_form')); ?>;
+    const mrp = Number(product.mrp || product.price || 0);
+    const price = Number(product.price || 0);
+    const savings = Math.max(0, mrp - price);
+    const unitLabel = product.unit_label || '1 pack';
+    const stockQuantity = Number(product.stock_quantity || 0);
+    const stockStatus = stockQuantity <= 0 ? 'Out of stock' : (stockQuantity <= 8 ? `Only ${stockQuantity} left` : 'In stock');
+    const deliveryLabel = `${Math.max(10, Number(product.delivery_minutes || 20))}-${Math.max(10, Number(product.delivery_minutes || 20)) + 10} mins`;
+    const badgeLabel = String(product.badge_text || '').trim() || (Number(product.is_featured || 0) === 1 ? 'Featured' : '');
+    const badgeMarkup = badgeLabel ? `<p class="muted">${escapeHtml(badgeLabel)}</p>` : '';
+    const savingsMarkup = savings > 0 ? `<p class="muted">Save Rs ${escapeHtml(savings)}</p>` : '';
+    const buttonDisabled = stockQuantity <= 0 ? 'disabled' : '';
+    const buttonLabel = stockQuantity <= 0 ? 'Out of Stock' : 'Add to Cart';
+
+    if (sectionName === 'shop') {
+      return `
+        <div class="product-card shop-product-card wide-product-card">
+          <div class="shop-product-image">
+            <img src="${escapeHtml(product.image)}" alt="${escapeHtml(product.name)}">
+          </div>
+          <div class="shop-product-body">
+            ${badgeMarkup}
+            <p class="product-category-label">${escapeHtml(product.category_name || 'Uncategorized')}</p>
+            <h4>${escapeHtml(product.name)}</h4>
+            <p class="price">Rs ${escapeHtml(price)} <span class="muted">MRP Rs ${escapeHtml(mrp)}</span></p>
+            <p class="muted">${escapeHtml(unitLabel)} | ${escapeHtml(stockStatus)}</p>
+            <p class="muted">Fast delivery in ${escapeHtml(deliveryLabel)}</p>
+            <p class="product-desc">${escapeHtml(truncateText(product.description, 100))}</p>
+            ${savingsMarkup}
+          </div>
+          <form method="POST" class="shop-cart-form">
+            <input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">
+            <input type="hidden" name="action" value="add_to_cart">
+            <input type="hidden" name="product_id" value="${escapeHtml(product.id)}">
+            <input type="hidden" name="redirect_section" value="shop">
+            <button type="submit" class="btn-primary full-btn" ${buttonDisabled}>${buttonLabel}</button>
+          </form>
+        </div>
+      `;
+    }
+
+    return `
       <div class="product-card home-product-card shop-product-card wide-product-card">
         <div class="shop-product-image home-product-image">
           <img src="${escapeHtml(product.image)}" alt="${escapeHtml(product.name)}">
         </div>
         <div class="home-product-body">
+          ${badgeMarkup}
           <p class="product-category-label">${escapeHtml(product.category_name || 'Uncategorized')}</p>
           <h4>${escapeHtml(product.name)}</h4>
-          <p class="price">Rs ${escapeHtml(product.price)}</p>
+          <p class="price">Rs ${escapeHtml(price)} <span class="muted">MRP Rs ${escapeHtml(mrp)}</span></p>
+          <p class="muted">${escapeHtml(unitLabel)} | ${escapeHtml(stockStatus)}</p>
+          <p class="muted">Fast delivery in ${escapeHtml(deliveryLabel)}</p>
           <p class="product-desc">${escapeHtml(truncateText(product.description, 90))}</p>
+          ${savingsMarkup}
         </div>
         <form method="POST" class="home-cart-form">
+          <input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">
           <input type="hidden" name="action" value="add_to_cart">
           <input type="hidden" name="product_id" value="${escapeHtml(product.id)}">
           <input type="hidden" name="redirect_section" value="home">
-          <button type="submit" class="btn-primary full-btn">Add to Cart</button>
+          <button type="submit" class="btn-primary full-btn" ${buttonDisabled}>${buttonLabel}</button>
         </form>
       </div>
-    `).join('');
+    `;
+  }
+
+  function renderHomeProducts(products) {
+    if (!Array.isArray(products) || products.length === 0) {
+      homeCategoryProducts.innerHTML = `
+        <div class="category-empty">
+          <h4>No products found</h4>
+          <p>No products are available in this category right now.</p>
+        </div>
+      `;
+      return;
+    }
+
+    homeCategoryProducts.innerHTML = products.map(product => buildProductCardMarkup(product, 'home')).join('');
+  }
+
+  function renderShopProducts(products) {
+    if (!Array.isArray(products) || products.length === 0) {
+      shopCategoryProducts.innerHTML = `
+        <div class="category-empty">
+          <h4>No products found</h4>
+          <p>No products are available for this filter right now.</p>
+        </div>
+      `;
+      return;
+    }
+
+    shopCategoryProducts.innerHTML = products.map(product => buildProductCardMarkup(product, 'shop')).join('');
   }
 
   async function loadHomeCategoryProducts(categoryId, categoryName) {
-    const endpoint = categoryId ? `../api/products.php?category_id=${encodeURIComponent(categoryId)}` : '../api/products.php';
+    const endpoint = buildProductsEndpoint(categoryId);
     homeCategoryTitle.textContent = categoryName;
     homeCategoryCopy.textContent = categoryId
-      ? `${categoryName} category ke saare products niche dikh rahe hain.`
-      : 'Store ke saare available products niche dikh rahe hain.';
+      ? `All products from the ${categoryName} category are shown below.`
+      : 'All available store products are shown below.';
     homeCategoryStatus.textContent = categoryId
       ? `Loading ${categoryName} products...`
       : 'Loading all products...';
@@ -645,16 +994,56 @@ function render_home_product_card(array $product): void
       const data = await response.json();
 
       if (!response.ok || !data.success) {
-        throw new Error(data.message || 'Products load nahi ho paaye.');
+        throw new Error(data.message || 'Unable to load products.');
       }
 
       homeCategoryStatus.textContent = categoryId
-        ? `${categoryName} category me ${data.products.length} product mile.`
+        ? `${data.products.length} products found in the ${categoryName} category.`
         : `${data.products.length} products available.`;
       renderHomeProducts(data.products);
     } catch (error) {
-      homeCategoryStatus.textContent = 'Products load nahi ho paaye.';
+      homeCategoryStatus.textContent = 'Unable to load products.';
       homeCategoryProducts.innerHTML = `<div class="category-empty">${escapeHtml(error.message)}</div>`;
+    }
+  }
+
+  async function loadShopCategoryProducts(categoryId, categoryName) {
+    const endpoint = buildProductsEndpoint(categoryId, currentShopSearch);
+    shopCategoryTitle.textContent = categoryName;
+    shopCategoryCopy.textContent = categoryId
+      ? `Filtered products from the ${categoryName} category are shown below.`
+      : 'All filtered shop products are shown below.';
+    shopCategoryStatus.textContent = categoryId
+      ? `Loading ${categoryName} products...`
+      : 'Loading all products...';
+    shopCategoryProducts.innerHTML = '<div class="category-empty">Loading products...</div>';
+
+    try {
+      const response = await fetch(endpoint, {
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest'
+        }
+      });
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.message || 'Unable to load products.');
+      }
+
+      if (currentShopSearch) {
+        shopCategoryStatus.textContent = categoryId
+          ? `${data.products.length} results found in ${categoryName} for "${currentShopSearch}".`
+          : `${data.products.length} results found for "${currentShopSearch}".`;
+      } else {
+        shopCategoryStatus.textContent = categoryId
+          ? `${data.products.length} products found in the ${categoryName} category.`
+          : `${data.products.length} products available.`;
+      }
+
+      renderShopProducts(data.products);
+    } catch (error) {
+      shopCategoryStatus.textContent = 'Unable to load products.';
+      shopCategoryProducts.innerHTML = `<div class="category-empty">${escapeHtml(error.message)}</div>`;
     }
   }
 
@@ -663,6 +1052,14 @@ function render_home_product_card(array $product): void
       homeCategoryButtons.forEach(item => item.classList.remove('is-active'));
       this.classList.add('is-active');
       loadHomeCategoryProducts(this.dataset.categoryId, this.dataset.categoryName);
+    });
+  });
+
+  shopCategoryButtons.forEach(button => {
+    button.addEventListener('click', function() {
+      shopCategoryButtons.forEach(item => item.classList.remove('is-active'));
+      this.classList.add('is-active');
+      loadShopCategoryProducts(this.dataset.categoryId, this.dataset.categoryName);
     });
   });
 
@@ -698,13 +1095,13 @@ function render_home_product_card(array $product): void
       }));
 
       if (!response.ok || !data.success) {
-        throw new Error(data.message || 'Product add nahi ho paaya.');
+        throw new Error(data.message || 'Unable to add the product to cart.');
       }
 
       updateCartCount(data.cart.total_items || 0);
       showDashboardToast(data.message || 'Product added to cart.');
     } catch (error) {
-      showDashboardToast(error.message || 'Product add nahi ho paaya.', 'error');
+      showDashboardToast(error.message || 'Unable to add the product to cart.', 'error');
     } finally {
       if (submitButton) {
         submitButton.disabled = false;
@@ -725,3 +1122,4 @@ function render_home_product_card(array $product): void
     }
   });
 </script>
+

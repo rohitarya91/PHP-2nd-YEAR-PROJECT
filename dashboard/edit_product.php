@@ -15,15 +15,16 @@ if (!$product) {
 $errors = [];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+  enforce_csrf_or_errors($errors, 'admin_edit_product_form');
   $validated = validate_product_data($_POST, false);
-  $errors = $validated['errors'];
+  $errors = array_merge($errors, $validated['errors']);
 
   if (empty($errors)) {
     $imageResult = resolve_product_image($_POST, $_FILES['image'], false, $product['image']);
 
     if (!$imageResult['success']) {
       $errors[] = $imageResult['message'];
-    } elseif (update_product($conn, $productId, $validated['name'], $validated['price'], $validated['description'], $imageResult['filename'], $validated['category_id'])) {
+    } elseif (update_product($conn, $productId, $validated, $imageResult['filename'], $product['sku'] ?? null)) {
       if ($imageResult['filename'] !== $product['image']) {
         delete_product_image($product['image']);
       }
@@ -37,8 +38,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
   $product['name'] = $validated['name'];
   $product['price'] = $validated['price'];
+  $product['mrp'] = $validated['mrp'];
+  $product['unit_label'] = $validated['unit_label'];
   $product['description'] = $validated['description'];
   $product['category_id'] = $validated['category_id'];
+  $product['stock_quantity'] = $validated['stock_quantity'];
+  $product['delivery_minutes'] = $validated['delivery_minutes'];
+  $product['badge_text'] = $validated['badge_text'];
+  $product['is_featured'] = $validated['is_featured'];
   foreach ($categories as $category) {
     if ((int) $category['id'] === (int) $validated['category_id']) {
       $product['category_name'] = $category['name'];
@@ -97,8 +104,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
       <div class="content-card edit-form-card">
         <form method="POST" enctype="multipart/form-data">
+          <?php echo csrf_field('admin_edit_product_form'); ?>
           <input type="text" name="name" placeholder="Product Name" required class="input-field" value="<?php echo e($product['name']); ?>">
           <input type="number" name="price" placeholder="Price" required class="input-field" value="<?php echo e((string) $product['price']); ?>">
+          <input type="number" name="mrp" placeholder="MRP" required class="input-field" value="<?php echo e((string) ($product['mrp'] ?? $product['price'])); ?>">
+          <input type="text" name="unit_label" placeholder="Unit / Pack Size" required class="input-field" value="<?php echo e($product['unit_label'] ?? ''); ?>">
           <select name="category_id" required class="input-field">
             <option value="">Select Category</option>
             <?php foreach ($categories as $category): ?>
@@ -107,6 +117,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
               </option>
             <?php endforeach; ?>
           </select>
+          <input type="number" name="stock_quantity" placeholder="Available Stock" required class="input-field" value="<?php echo e((string) ($product['stock_quantity'] ?? 0)); ?>">
+          <input type="number" name="delivery_minutes" placeholder="Delivery ETA in Minutes" required class="input-field" value="<?php echo e((string) ($product['delivery_minutes'] ?? 20)); ?>">
+          <input type="text" name="badge_text" placeholder="Badge Text" class="input-field" value="<?php echo e($product['badge_text'] ?? ''); ?>">
+          <label class="muted" style="display:flex; align-items:center; gap:10px;">
+            <input type="checkbox" name="is_featured" value="1" <?php echo (int) ($product['is_featured'] ?? 0) === 1 ? 'checked' : ''; ?>>
+            Mark as featured product
+          </label>
           <textarea name="description" placeholder="Product Description" required class="input-field text-area-field"><?php echo e($product['description']); ?></textarea>
           <div class="file-input-wrapper">
             <label>Change Product Image:</label>
@@ -120,10 +137,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <img src="<?php echo e(product_image_src($product['image'])); ?>" alt="<?php echo e($product['name']); ?>">
               </div>
               <div class="product-body">
+                <?php $badgeLabel = product_badge_label($product); ?>
+                <?php if ($badgeLabel !== ''): ?>
+                  <p class="muted"><?php echo e($badgeLabel); ?></p>
+                <?php endif; ?>
                 <h3><?php echo e($product['name']); ?></h3>
-                <p class="muted"><?php echo e($product['category_name'] ?? 'Uncategorized'); ?></p>
-                <p class="price">Rs <?php echo e((string) $product['price']); ?></p>
+                <p class="muted"><?php echo e($product['category_name'] ?? 'Uncategorized'); ?> | <?php echo e(product_unit_label($product)); ?></p>
+                <p class="price">Rs <?php echo e((string) $product['price']); ?> <span class="muted">MRP Rs <?php echo e((string) product_mrp_value($product)); ?></span></p>
                 <p class="product-desc"><?php echo e(product_short_description($product['description'], 120)); ?></p>
+                <p class="muted"><?php echo e(product_stock_status($product)); ?> | ETA <?php echo e(product_delivery_window($product)); ?></p>
               </div>
             </div>
           </div>
